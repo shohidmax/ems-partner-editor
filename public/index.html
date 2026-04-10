@@ -1,0 +1,878 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Max IT Admin edit Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --sidebar-width: 260px;
+            --card-bg: rgba(30, 41, 59, 0.6);
+            --border-color: rgba(255, 255, 255, 0.08);
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --primary: #3b82f6;
+            --primary-hover: #2563eb;
+            --success: #10b981;
+            --danger: #ef4444;
+            --warning: #f59e0b;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: var(--bg-color);
+            background-image: 
+                radial-gradient(circle at top right, rgba(30, 27, 75, 0.5), transparent 50%),
+                radial-gradient(circle at bottom left, #0f172a, transparent 50%);
+            background-attachment: fixed;
+            color: var(--text-main);
+            height: 100vh;
+            display: flex;
+            overflow: hidden;
+        }
+
+        /* --- SIDEBAR --- */
+        .sidebar {
+            width: var(--sidebar-width);
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(20px);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            padding: 1.5rem;
+            z-index: 100;
+        }
+
+        .brand {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: white;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 2.5rem;
+        }
+        
+        .brand .material-icons-round { color: var(--primary); }
+
+        .nav-link {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.85rem 1rem;
+            color: var(--text-muted);
+            text-decoration: none;
+            border-radius: 0.5rem;
+            font-weight: 500;
+            margin-bottom: 0.5rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .nav-link:hover, .nav-link.active {
+            background: rgba(59, 130, 246, 0.1);
+            color: var(--primary);
+        }
+
+        /* --- MAIN CONTENT --- */
+        .main-wrapper {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .topbar {
+            height: 70px;
+            border-bottom: 1px solid var(--border-color);
+            background: rgba(15, 23, 42, 0.5);
+            backdrop-filter: blur(10px);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 2rem;
+        }
+
+        .content-area {
+            flex: 1;
+            padding: 2rem;
+            overflow-y: auto;
+        }
+
+        /* --- GENERAL COMPONENTS --- */
+        h1.page-title {
+            font-size: 1.75rem;
+            font-weight: 600;
+            margin-bottom: 1.5rem;
+        }
+
+        .card {
+            background: var(--card-bg);
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--border-color);
+            border-radius: 1rem;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+        }
+        
+        .card-header {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid var(--border-color);
+            color: var(--text-main);
+        }
+
+        input, textarea, select {
+            width: 100%;
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+            margin-bottom: 1rem;
+            font-family: inherit;
+            transition: border-color 0.2s;
+        }
+
+        input:focus, textarea:focus, select:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+        }
+
+        button {
+            width: 100%;
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 0.75rem 1rem;
+            border-radius: 0.5rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s, transform 0.1s;
+        }
+
+        button:hover { background: var(--primary-hover); }
+        button:active { transform: scale(0.98); }
+
+        .btn-outline {
+            background: transparent;
+            border: 1px solid var(--primary);
+            color: var(--primary);
+        }
+        .btn-outline:hover { background: rgba(59, 130, 246, 0.1); }
+
+        .btn-sm { width: auto; padding: 0.4rem 0.75rem; font-size: 0.85rem; }
+        .btn-danger { background: var(--danger); }
+        .btn-danger:hover { background: #b91c1c; }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+            align-items: start;
+        }
+        
+        .grid-2 { grid-template-columns: repeat(2, 1fr); }
+        .grid-4 { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+
+        .response-area {
+            margin-top: 1rem;
+            padding: 1rem;
+            background: #000;
+            border-radius: 0.5rem;
+            font-family: monospace;
+            font-size: 0.85rem;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            min-height: 50px;
+            max-height: 200px;
+            overflow-y: auto;
+            color: var(--success);
+        }
+        .response-area.error { color: var(--danger); }
+
+        /* --- STATS & BADGES --- */
+        .stat-card {
+            background: linear-gradient(135deg, rgba(30, 41, 59, 0.9), rgba(15, 23, 42, 0.9));
+            border-radius: 1rem;
+            padding: 1.5rem;
+            border: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+        .stat-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 0.75rem;
+            background: rgba(59, 130, 246, 0.2);
+            color: var(--primary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .stat-icon.green { background: rgba(16, 185, 129, 0.2); color: var(--success); }
+        .stat-icon.orange { background: rgba(245, 158, 11, 0.2); color: var(--warning); }
+        
+        .stat-val { font-size: 1.75rem; font-weight: 700; color: white; display: block; }
+        .stat-label { font-size: 0.875rem; color: var(--text-muted); }
+
+        /* --- DEVICE LIST & TABLE --- */
+        .device-item {
+            cursor: pointer;
+            padding: 1rem;
+            border-radius: 0.75rem;
+            background: rgba(59, 130, 246, 0.05);
+            border: 1px solid rgba(59, 130, 246, 0.2);
+            transition: all 0.2s;
+            margin-bottom: 0.75rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .device-item:hover {
+            background: rgba(59, 130, 246, 0.15);
+            border-color: var(--primary);
+            transform: translateX(4px);
+        }
+
+        .table-responsive {
+            width: 100%;
+            overflow-x: auto;
+            max-height: 450px;
+            border-radius: 0.75rem;
+            border: 1px solid var(--border-color);
+            background: rgba(15, 23, 42, 0.5);
+        }
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.875rem;
+            text-align: left;
+        }
+        .data-table th, .data-table td {
+            padding: 0.85rem 1rem;
+            border-bottom: 1px solid var(--border-color);
+            white-space: nowrap;
+        }
+        .data-table th {
+            background: rgba(30, 41, 59, 0.95);
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            font-weight: 600;
+            color: var(--primary);
+        }
+        .data-table tbody tr:hover { background: rgba(255, 255, 255, 0.02); }
+
+        /* --- MODAL --- */
+        .modal-overlay {
+            position: fixed; inset: 0;
+            background: rgba(15, 23, 42, 0.8);
+            backdrop-filter: blur(8px);
+            z-index: 1000; display: none;
+            align-items: center; justify-content: center;
+        }
+        .modal-overlay.active { display: flex; animation: fadeIn 0.2s ease; }
+        .modal-content {
+            background: var(--bg-color);
+            border: 1px solid var(--border-color);
+            padding: 2rem; border-radius: 1rem;
+            width: 100%; max-width: 400px;
+            position: relative;
+        }
+        .modal-close {
+            position: absolute; top: 1rem; right: 1rem;
+            cursor: pointer; color: var(--text-muted);
+        }
+        .modal-close:hover { color: white; }
+
+        /* Utilities */
+        .tab-pane { display: none; animation: fadeIn 0.3s ease; }
+        .tab-pane.active { display: block; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+        
+        .d-flex { display: flex; align-items: center; }
+        .justify-between { justify-content: space-between; }
+        .gap-2 { gap: 0.5rem; }
+        .gap-3 { gap: 1rem; }
+        
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); }
+    </style>
+</head>
+<body>
+
+    <div class="sidebar">
+        <div class="brand">
+            <span class="material-icons-round">bolt</span>
+            Max IT IoT
+        </div>
+
+        <div style="flex:1;">
+            <div class="nav-link active" onclick="switchTab('dashboard')">
+                <span class="material-icons-round">dashboard</span>
+                Dashboard
+            </div>
+            <div class="nav-link" onclick="switchTab('devices')">
+                <span class="material-icons-round">router</span>
+                My Devices
+            </div>
+            <div class="nav-link" onclick="switchTab('data')">
+                <span class="material-icons-round">table_chart</span>
+                Historical Data
+            </div>
+            <div class="nav-link" onclick="switchTab('tools')">
+                <span class="material-icons-round">build</span>
+                Developer Tools
+            </div>
+        </div>
+        
+        <div style="border-top: 1px solid var(--border-color); padding-top: 1rem; margin-top: auto;">
+            <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.5rem;">API TARGET URL:</div>
+            <input type="text" id="baseUrl" value="https://editems.maxapi.esp32.site" style="padding: 0.5rem; font-size: 0.75rem; margin-bottom:0;">
+        </div>
+    </div>
+
+    <div class="main-wrapper">
+        <div class="topbar">
+            <h1 class="page-title" style="margin: 0;" id="topbarTitle">Dashboard Overview</h1>
+            <div class="d-flex gap-3">
+                <div style="display:flex; flex-direction:column; align-items:flex-end;">
+                    <span style="font-size: 0.75rem; color: var(--text-muted);">Current Authentication</span>
+                    <span id="tokenDisplay" style="font-size: 0.85rem; font-family: monospace; color: var(--danger);">Not Logged In</span>
+                </div>
+                <button class="btn-sm btn-outline" id="btnLogin" onclick="openLoginModal()" style="color:var(--text-main); border-color:var(--text-muted);">Login</button>
+                <button class="btn-sm btn-outline btn-danger" style="display:none;" id="btnLogout" onclick="clearToken()">Logout</button>
+            </div>
+        </div>
+
+        <div class="content-area">
+            
+            <!-- ====== DASHBOARD TAB ====== -->
+            <div id="dashboard" class="tab-pane active">
+                <div class="grid grid-4" style="margin-bottom: 1.5rem;">
+                    <div class="stat-card">
+                        <div class="stat-icon"><span class="material-icons-round">memory</span></div>
+                        <div>
+                            <span class="stat-val" id="statTotalDev">-</span>
+                            <span class="stat-label">Total Devices</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon green"><span class="material-icons-round">wifi</span></div>
+                        <div>
+                            <span class="stat-val" id="statOnlineDev">-</span>
+                            <span class="stat-label">Online Devices</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon orange"><span class="material-icons-round">group</span></div>
+                        <div>
+                            <span class="stat-val" id="statTotalUsers">-</span>
+                            <span class="stat-label">Total Users</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header d-flex justify-between">
+                        <span>Admin Gateway Status</span>
+                        <button class="btn-sm btn-outline" style="width: auto;" onclick="getAdminStats()"><span class="material-icons-round" style="font-size:1rem; vertical-align:middle;">refresh</span> Refresh</button>
+                    </div>
+                    <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1rem;">Requires Admin-level privileges to fetch detailed stats.</p>
+                    <div class="response-area" id="statsRes" style="margin-top:0;">Hit refresh to load system statistics payload...</div>
+                </div>
+            </div>
+
+            <!-- ====== MY DEVICES TAB ====== -->
+            <div id="devices" class="tab-pane">
+                <div class="card">
+                    <div class="card-header d-flex justify-between">
+                        <span>Fleet Management</span>
+                        <button class="btn-sm btn-outline" style="width: auto;" onclick="fetchMyDevices()"><span class="material-icons-round" style="font-size:1rem; vertical-align:middle;">refresh</span> Load Network</button>
+                    </div>
+                    <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1.5rem;">Clicking on a device will automatically route you to its historical data table.</p>
+                    <div id="deviceList">
+                        <div style="color: var(--text-muted); text-align: center; padding: 2rem;">Please login or click refresh to load your devices.</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ====== HISTORICAL DATA TAB ====== -->
+            <div id="data" class="tab-pane">
+                <div class="card">
+                    <div class="card-header">Telemetry Explorer</div>
+                    
+                    <div class="grid grid-2" style="margin-bottom: 1.5rem;">
+                        <div>
+                            <label style="font-size:0.8rem; color:var(--text-muted);">Target Device UID (Required)</label>
+                            <input type="text" id="rangeUid" placeholder="e.g. TEST-DEV-01">
+                        </div>
+                        <div>
+                            <label style="font-size:0.8rem; color:var(--text-muted);">Row Limit</label>
+                            <input type="number" id="rangeLimit" placeholder="Default: 100" value="100">
+                        </div>
+                        <div>
+                            <label style="font-size:0.8rem; color:var(--text-muted);">Start Date Filter (Optional)</label>
+                            <input type="datetime-local" id="rangeStart" style="color:var(--text-muted);">
+                        </div>
+                        <div>
+                            <label style="font-size:0.8rem; color:var(--text-muted);">End Date Filter (Optional)</label>
+                            <input type="datetime-local" id="rangeEnd" style="color:var(--text-muted);">
+                        </div>
+                    </div>
+                    
+                    <button onclick="fetchDataByRange()" style="margin-bottom: 1rem;"><span class="material-icons-round" style="vertical-align:middle; font-size:1.2rem; margin-right:0.5rem;">search</span> Execute Query</button>
+                    
+                    <div class="response-area" id="rangeRes" style="display:none;"></div>
+                    <div class="table-responsive" id="tableContainer" style="display:none;"></div>
+                </div>
+            </div>
+
+            <!-- ====== DEVELOPER TOOLS TAB ====== -->
+            <div id="tools" class="tab-pane">
+                <div class="grid">
+                    <!-- Login moved to modal -->
+
+                    <div class="card">
+                        <div class="card-header">2. Mock ESP32 Hardware Delivery</div>
+                        <p style="color:var(--text-muted); font-size:0.85rem; padding-bottom:1rem;">Simulate an HTTP Push Payload directly to the <code>/api/esp32p</code> endpoint.</p>
+                        <textarea id="espData" rows="6" style="font-family:monospace; font-size:0.85rem;">
+{
+  "uid": "TEST-DEV-01",
+  "version": "1.0",
+  "environment": { "temp": 28.5, "hum": 65 },
+  "pssensor": { "depth_ft": 42 },
+  "rain": { "mm": 0 }
+}</textarea>
+                        <button class="btn-outline" onclick="pushESPData()"><span class="material-icons-round" style="vertical-align:middle; font-size:1rem;">send</span> Transmit Payload</button>
+                        <div class="response-area" id="espRes">Waiting for request...</div>
+                    </div>
+
+                    <div class="card" style="grid-column: 1 / -1;">
+                        <div class="card-header">3. Profile Debugger</div>
+                        <button class="btn-outline" onclick="getProfile()">Dump User Payload</button>
+                        <div class="response-area" id="profileRes">Waiting for request...</div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- ====== LOGIN MODAL ====== -->
+    <div class="modal-overlay" id="loginModal">
+        <div class="modal-content">
+            <span class="material-icons-round modal-close" onclick="closeLoginModal()">close</span>
+            <div class="card-header" style="border:none; margin-bottom:0.5rem; font-size:1.5rem;">Sign In</div>
+            <p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:1.5rem;">Authenticate to get your Bearer Token.</p>
+            <form id="loginForm">
+                <input type="email" id="loginEmail" placeholder="Email Address" required>
+                <input type="password" id="loginPass" placeholder="Password" required>
+                <button type="submit">Authenticate</button>
+            </form>
+            <div class="response-area" id="loginRes" style="display:none; max-height:100px;"></div>
+        </div>
+    </div>
+
+<script>
+    // --- STATE MANAGEMENT ---
+    let authToken = localStorage.getItem('api_token') || '';
+    
+    function getBaseUrl() {
+        let url = document.getElementById('baseUrl').value.trim();
+        if (url.endsWith('/')) url = url.slice(0, -1);
+        return url;
+    }
+
+    function updateTokenDisplay() {
+        const el = document.getElementById('tokenDisplay');
+        const btn = document.getElementById('btnLogout');
+        if(authToken) {
+            el.textContent = 'Active (...'+authToken.substring(authToken.length-6)+')';
+            el.style.color = 'var(--success)';
+            btn.style.display = 'block';
+            document.getElementById('btnLogin').style.display = 'none';
+        } else {
+            el.textContent = 'Not Logged In';
+            el.style.color = 'var(--danger)';
+            btn.style.display = 'none';
+            document.getElementById('btnLogin').style.display = 'block';
+            document.getElementById('statTotalDev').innerText = '-';
+            document.getElementById('statOnlineDev').innerText = '-';
+            document.getElementById('statTotalUsers').innerText = '-';
+        }
+    }
+
+    function openLoginModal() {
+        document.getElementById('loginModal').classList.add('active');
+        document.getElementById('loginRes').style.display = 'none';
+    }
+    
+    function closeLoginModal() {
+        document.getElementById('loginModal').classList.remove('active');
+    }
+
+    function clearToken() {
+        authToken = '';
+        localStorage.removeItem('api_token');
+        updateTokenDisplay();
+        document.getElementById('deviceList').innerHTML = '<div style="color: var(--text-muted); text-align: center; padding: 2rem;">Please login or click refresh to load your devices.</div>';
+        alert("Logged out successfully");
+    }
+
+    function setResponse(id, data, isError = false) {
+        const el = document.getElementById(id);
+        el.textContent = typeof data === 'object' ? JSON.stringify(data, null, 2) : data;
+        if(isError) el.classList.add('error');
+        else el.classList.remove('error');
+    }
+
+    async function safeFetchParse(res) {
+        const text = await res.text();
+        try { return JSON.parse(text); } 
+        catch (e) { return text || `Status: ${res.status} ${res.statusText}`; }
+    }
+
+    // --- TAB SWITCHER LOGIC ---
+    function switchTab(tabId) {
+        document.querySelectorAll('.tab-pane').forEach(el => el.classList.remove('active'));
+        document.querySelectorAll('.nav-link').forEach(el => el.classList.remove('active'));
+        
+        document.getElementById(tabId).classList.add('active');
+        event.currentTarget.classList.add('active');
+        
+        const titles = {
+            'dashboard': 'Dashboard Overview',
+            'devices': 'Fleet Management',
+            'data': 'Telemetry Explorer',
+            'tools': 'Developer API Tools'
+        };
+        document.getElementById('topbarTitle').innerText = titles[tabId];
+        
+        // Auto fetch logic if needed
+        if(tabId === 'devices' && authToken) fetchMyDevices();
+        if(tabId === 'dashboard' && authToken) getAdminStats();
+    }
+
+    // --- API CALLS ---
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const email = document.getElementById('loginEmail').value;
+        const pass = document.getElementById('loginPass').value;
+        const btn = e.target.querySelector('button');
+        btn.innerText = "Authenticating...";
+        
+        try {
+            const res = await fetch(`${getBaseUrl()}/api/auth/login`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, password: pass })
+            });
+            const data = await safeFetchParse(res);
+            
+            if(res.ok && data.token) {
+                authToken = data.token;
+                localStorage.setItem('api_token', authToken);
+                updateTokenDisplay();
+                fetchMyDevices();
+                getAdminStats();
+                closeLoginModal(); // Close modal on success
+            } else {
+                document.getElementById('loginRes').style.display = 'block';
+                setResponse('loginRes', data, !res.ok);
+            }
+        } catch(err) {
+            document.getElementById('loginRes').style.display = 'block';
+            setResponse('loginRes', "Network Error: " + err.message, true);
+        }
+        btn.innerText = "Authenticate";
+    });
+
+    async function pushESPData() {
+        const payload = document.getElementById('espData').value;
+        try {
+            const res = await fetch(`${getBaseUrl()}/api/esp32p`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: payload
+            });
+            const data = await safeFetchParse(res);
+            setResponse('espRes', data, !res.ok);
+        } catch(err) {
+            setResponse('espRes', "Network Error: " + err.message, true);
+        }
+    }
+
+    async function getProfile() {
+        try {
+            const res = await fetch(`${getBaseUrl()}/api/user/profile`, {
+                headers: { 'Authorization': `Bearer ${authToken}` }
+            });
+            const data = await safeFetchParse(res);
+            setResponse('profileRes', data, !res.ok);
+        } catch(err) {
+            setResponse('profileRes', "Network Error: " + err.message, true);
+        }
+    }
+    
+    async function getAdminStats() {
+        if(!authToken) return;
+        try {
+            const res = await fetch(`${getBaseUrl()}/api/admin/stats`, {
+                headers: { 'Authorization': `Bearer ${authToken}` }
+            });
+            const data = await safeFetchParse(res);
+            setResponse('statsRes', data, !res.ok);
+            if(res.ok && data.totalDevices !== undefined) {
+                document.getElementById('statTotalDev').innerText = data.totalDevices;
+                document.getElementById('statOnlineDev').innerText = data.onlineDevices;
+                document.getElementById('statTotalUsers').innerText = data.totalUsers;
+            }
+        } catch(err) {
+            setResponse('statsRes', "Network Error: " + err.message, true);
+        }
+    }
+
+    async function fetchMyDevices() {
+        if (!authToken) return;
+        const listEl = document.getElementById('deviceList');
+        listEl.innerHTML = '<div style="color:var(--text-muted); padding:1rem;">Loading devices...</div>';
+        try {
+            let res = await fetch(`${getBaseUrl()}/api/admin/devices`, {
+                headers: { 'Authorization': `Bearer ${authToken}` }
+            });
+            
+            if (res.status === 403) {
+                res = await fetch(`${getBaseUrl()}/api/user/devices`, {
+                    headers: { 'Authorization': `Bearer ${authToken}` }
+                });
+            }
+
+            const devices = await safeFetchParse(res);
+            if(res.ok && Array.isArray(devices)) {
+                listEl.innerHTML = '';
+                if (devices.length === 0) {
+                    listEl.innerHTML = '<div style="color:var(--text-muted); font-size: 0.875rem; padding:1rem;">No devices found.</div>';
+                    listEl.className = '';
+                } else {
+                    listEl.className = 'grid grid-4';
+                    devices.forEach(dev => {
+                        const isOnline = dev.status === 'online';
+                        const dotColor = isOnline ? 'var(--success)' : 'var(--danger)';
+                        listEl.innerHTML += `
+                            <div class="device-item" style="margin-bottom:0; flex-direction:column; align-items:flex-start; gap:1rem;" onclick="selectDevice('${dev.uid}')">
+                                <div class="d-flex justify-between" style="width:100%; align-items:center;">
+                                    <div class="d-flex gap-2">
+                                        <span class="material-icons-round" style="color: ${isOnline ? 'var(--success)' : 'var(--text-muted)'}; opacity:0.8;">router</span>
+                                        <strong>${dev.name || 'Device'}</strong>
+                                    </div>
+                                    <span style="font-size: 0.7rem; font-weight: bold; color: ${dotColor}; background: ${isOnline?'rgba(16, 185, 129, 0.1)':'rgba(239, 68, 68, 0.1)'}; padding: 0.25rem 0.5rem; border-radius:1rem;">● ${dev.status ? dev.status.toUpperCase() : 'OFFLINE'}</span>
+                                </div>
+                                <div style="font-size: 0.75rem; color: var(--text-muted); font-family: monospace; background: rgba(0,0,0,0.2); padding: 0.5rem; border-radius: 0.5rem; width:100%; text-align:center;">${dev.uid}</div>
+                            </div>
+                        `;
+                    });
+                }
+            } else {
+                 listEl.innerHTML = `<div style="color:var(--danger); padding:1rem;">${devices.message || 'Error fetching'}</div>`;
+            }
+        } catch(e) {
+            listEl.innerHTML = `<div style="color:var(--danger); padding:1rem;">Network Error</div>`;
+        }
+    }
+
+    function selectDevice(uid) {
+        // Switch tab
+        switchTab('data');
+        document.querySelectorAll('.nav-link')[2].classList.add('active'); // highlight nav
+        
+        document.getElementById('rangeUid').value = uid;
+        fetchDataByRange();
+    }
+    
+    async function fetchDataByRange() {
+        const uid = document.getElementById('rangeUid').value.trim();
+        const start = document.getElementById('rangeStart').value;
+        const end = document.getElementById('rangeEnd').value;
+        const limitStr = document.getElementById('rangeLimit').value;
+        
+        const resEl = document.getElementById('rangeRes');
+        const tblEl = document.getElementById('tableContainer');
+        
+        if (!uid) {
+            resEl.style.display = 'block';
+            tblEl.style.display = 'none';
+            setResponse('rangeRes', 'Error: Target Device UID is required', true);
+            return;
+        }
+
+        const payload = { uid };
+        if (start && end) {
+            payload.start = new Date(start).toISOString();
+            payload.end = new Date(end).toISOString();
+        }
+        if (limitStr) payload.limit = parseInt(limitStr, 10);
+
+        try {
+            resEl.style.display = 'block';
+            tblEl.style.display = 'none';
+            setResponse('rangeRes', 'Querying Database...');
+
+            const res = await fetch(`${getBaseUrl()}/api/public/device/data-by-range`, {
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${authToken}`
+                },
+                body: JSON.stringify(payload)
+            });
+            const data = await safeFetchParse(res);
+            
+            if (res.ok && Array.isArray(data)) {
+                renderTable(data);
+            } else {
+                setResponse('rangeRes', data, !res.ok);
+            }
+        } catch(err) {
+            setResponse('rangeRes', "Network Error: " + err.message, true);
+        }
+    }
+
+    function renderTable(data) {
+        const resEl = document.getElementById('rangeRes');
+        const container = document.getElementById('tableContainer');
+        
+        if (data.length === 0) {
+            setResponse('rangeRes', "No records found for the given parameters.");
+            return;
+        }
+        resEl.style.display = 'none';
+        container.style.display = 'block';
+
+        let html = '<table class="data-table"><thead><tr>';
+        html += '<th>Date/Time</th>';
+        html += '<th>Temp (°C)</th>';
+        html += '<th>Humidity (%)</th>';
+        html += '<th>Water Level</th>';
+        html += '<th>Rain (mm)</th>';
+        html += '<th>Action</th>';
+        html += '</tr></thead><tbody>';
+
+        data.forEach(row => {
+            const dateStr = new Date(row.receivedAt || row.timestamp).toLocaleString();
+            const temp = (row.environment && row.environment.temp !== undefined) ? row.environment.temp : (row.temperature !== undefined ? row.temperature : '-');
+            const hum = (row.environment && row.environment.hum !== undefined) ? row.environment.hum : '-';
+            const wl = (row.pssensor && row.pssensor.depth_ft !== undefined) ? row.pssensor.depth_ft : (row.water_level !== undefined ? row.water_level : '-');
+            const rain = (row.rain && row.rain.mm !== undefined) ? row.rain.mm : (row.rainfall !== undefined ? row.rainfall : '-');
+
+            html += `<tr data-id="${row._id || ''}">`;
+            html += `<td>${dateStr}</td>`;
+            html += `<td>${temp}</td>`;
+            html += `<td>${hum}</td>`;
+            html += `<td>${wl}</td>`;
+            html += `<td>${rain}</td>`;
+            if (row._id) {
+                html += `<td><button class="btn-sm btn-outline" style="min-width: 60px;" onclick="editRow(this)">Edit</button></td>`;
+            } else {
+                html += `<td>-</td>`;
+            }
+            html += `</tr>`;
+        });
+
+        html += '</tbody></table>';
+        container.innerHTML = html;
+    }
+
+    function editRow(btn) {
+        const tr = btn.closest('tr');
+        const tds = tr.querySelectorAll('td');
+        
+        const temp = tds[1].innerText;
+        const hum = tds[2].innerText;
+        const wl = tds[3].innerText;
+        const rain = tds[4].innerText;
+        
+        const inStyle = `margin:0; padding:0.35rem; font-size: 0.8rem; width: 60px; text-align: center; border-color: rgba(255,255,255,0.2)`;
+        tds[1].innerHTML = `<input type="number" step="0.1" value="${temp !== '-' ? temp : ''}" style="${inStyle}">`;
+        tds[2].innerHTML = `<input type="number" step="0.1" value="${hum !== '-' ? hum : ''}" style="${inStyle}">`;
+        tds[3].innerHTML = `<input type="number" step="0.1" value="${wl !== '-' ? wl : ''}" style="${inStyle}">`;
+        tds[4].innerHTML = `<input type="number" step="0.1" value="${rain !== '-' ? rain : ''}" style="${inStyle}">`;
+        
+        btn.innerText = "Save Data";
+        btn.setAttribute('onclick', 'saveRow(this)');
+        btn.className = "btn-sm"; 
+        btn.style.background = "var(--success)";
+        btn.style.color = "white";
+        btn.style.border = "none";
+    }
+
+    async function saveRow(btn) {
+        const tr = btn.closest('tr');
+        const tds = tr.querySelectorAll('td');
+        const id = tr.getAttribute('data-id');
+        
+        const temp = tds[1].querySelector('input').value;
+        const hum = tds[2].querySelector('input').value;
+        const wl = tds[3].querySelector('input').value;
+        const rain = tds[4].querySelector('input').value;
+        
+        btn.innerText = "...";
+        
+        try {
+            const res = await fetch(`${getBaseUrl()}/api/public/device/data/${id}`, {
+                method: 'PUT',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${authToken}`
+                },
+                body: JSON.stringify({
+                    temperature: temp !== '' ? parseFloat(temp) : undefined,
+                    humidity: hum !== '' ? parseFloat(hum) : undefined,
+                    water_level: wl !== '' ? parseFloat(wl) : undefined,
+                    rainfall: rain !== '' ? parseFloat(rain) : undefined
+                })
+            });
+            
+            if (res.ok) {
+                tds[1].innerText = temp !== '' ? temp : '-';
+                tds[2].innerText = hum !== '' ? hum : '-';
+                tds[3].innerText = wl !== '' ? wl : '-';
+                tds[4].innerText = rain !== '' ? rain : '-';
+                btn.innerText = "Edit";
+                btn.setAttribute('onclick', 'editRow(this)');
+                btn.className = "btn-sm btn-outline";
+                btn.style = "min-width: 60px;";
+            } else {
+                const data = await safeFetchParse(res);
+                alert("Error: " + (data.message || "Failed update"));
+                btn.innerText = "Edit"; // reset so it can be re-triggered
+            }
+        } catch (e) {
+            alert("Network Error: " + e.message);
+            btn.innerText = "Edit";
+        }
+    }
+
+    // INITIALIZATION
+    updateTokenDisplay();
+    if(authToken) {
+        getAdminStats();
+    }
+</script>
+
+</body>
+</html>

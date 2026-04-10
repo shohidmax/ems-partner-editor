@@ -765,7 +765,7 @@ app.use('/api/admin', adminRouter);
 
 // রুট রুট
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'api-test.html'));
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 // --- সার্ভার স্টার্টআপ ফাংশন ---
