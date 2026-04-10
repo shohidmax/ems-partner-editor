@@ -765,7 +765,7 @@ app.use('/api/admin', adminRouter);
 
 // রুট রুট
 app.get('/', (req, res) => {
-    res.send(`<h2 style="color:green;text-align:center;">Max IT IoT Server Running</h2>`);
+    res.sendFile(path.join(__dirname, 'public', 'api-test.html'));
 });
 
 // --- সার্ভার স্টার্টআপ ফাংশন ---
