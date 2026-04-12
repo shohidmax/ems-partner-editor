@@ -347,7 +347,7 @@ async function run() {
         const docs = await EspCollection.find(q)
           .sort({ timestamp: -1 })
           .limit(lim)
-          .project({ uid: 1, pssensor: 1, environment: 1, rain: 1, timestamp: 1, _id: 0 }) 
+          .project({ uid: 1, pssensor: 1, environment: 1, rain: 1, timestamp: 1, receivedAt: 1, _id: 0 }) 
           .toArray();
 
         return res.send(docs);
@@ -377,7 +377,7 @@ async function run() {
           const docs = await EspCollection.find({ uid: String(uid), timestamp: { $gte: startDate, $lte: endDate } })
             .sort({ timestamp: 1 })
             .limit(lim)
-            .project({ uid: 1, pssensor: 1, environment: 1, rain: 1, timestamp: 1, _id: 0 })
+            .project({ uid: 1, pssensor: 1, environment: 1, rain: 1, timestamp: 1, receivedAt: 1, _id: 0 })
             .toArray();
   
           return res.send(docs);

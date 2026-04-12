@@ -299,7 +299,7 @@ publicRouter.post('/device/data-by-range', authenticateJWT, async (req, res) => 
         const docs = await req.db.collection('espdata2').find(query)
           .sort({ receivedAt: 1 }) // receivedAt দিয়ে সাজানো
           .limit(lim)
-          .project({ uid: 1, pssensor: 1, environment: 1, rain: 1, timestamp: 1, dateTime: 1, temperature: 1, water_level: 1, rainfall: 1 })
+          .project({ uid: 1, pssensor: 1, environment: 1, rain: 1, timestamp: 1, dateTime: 1, temperature: 1, water_level: 1, rainfall: 1, receivedAt: 1 })
           .toArray();
 
         return res.send(docs);
