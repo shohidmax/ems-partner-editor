@@ -96,7 +96,9 @@ function authenticateJWT(req, res, next) {
   }
 }
 
-app.use(helmet());
+app.use(helmet({
+    contentSecurityPolicy: false
+}));
 app.use(compression());
 app.use(cors());
 app.use(express.json());
