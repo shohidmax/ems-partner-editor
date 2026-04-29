@@ -435,7 +435,10 @@
                         </div>
                     </div>
                     
-                    <button onclick="fetchDataByRange()" style="margin-bottom: 1rem;"><span class="material-icons-round" style="vertical-align:middle; font-size:1.2rem; margin-right:0.5rem;">search</span> Execute Query</button>
+                    <div class="d-flex gap-3" style="margin-bottom: 1rem;">
+                        <button onclick="fetchDataByRange()" style="flex: 2;"><span class="material-icons-round" style="vertical-align:middle; font-size:1.2rem; margin-right:0.5rem;">search</span> Execute Query</button>
+                        <button class="btn-outline" onclick="downloadBackup()" style="flex: 1; border-color: var(--success); color: var(--success);"><span class="material-icons-round" style="vertical-align:middle; font-size:1.2rem; margin-right:0.5rem;">download</span> Download Backup (ZIP)</button>
+                    </div>
                     
                     <div class="response-area" id="rangeRes" style="display:none;"></div>
                     <div class="table-responsive" id="tableContainer" style="display:none;"></div>
@@ -683,6 +686,7 @@
                                     <span style="font-size: 0.7rem; font-weight: bold; color: ${dotColor}; background: ${isOnline?'rgba(16, 185, 129, 0.1)':'rgba(239, 68, 68, 0.1)'}; padding: 0.25rem 0.5rem; border-radius:1rem;">● ${dev.status ? dev.status.toUpperCase() : 'OFFLINE'}</span>
                                 </div>
                                 <div style="font-size: 0.75rem; color: var(--text-muted); font-family: monospace; background: rgba(0,0,0,0.2); padding: 0.5rem; border-radius: 0.5rem; width:100%; text-align:center;">${dev.uid}</div>
+                                <button class="btn-sm btn-outline" style="width:100%; margin-top: 0.75rem; border-color:var(--primary); color:var(--text-main);" onclick="event.stopPropagation(); promptReplaceDevice('${dev.uid}')"><span class="material-icons-round" style="vertical-align:middle; font-size:1rem; margin-right:0.2rem;">swap_horiz</span> Replace Device</button>
                             </div>
                         `;
                     });
@@ -864,6 +868,93 @@
         } catch (e) {
             alert("Network Error: " + e.message);
             btn.innerText = "Edit";
+        }
+    }
+
+    // --- NEW FEATURES ---
+    async function promptReplaceDevice(oldUid) {
+        const newUid = prompt(`Replace Device: ${oldUid}\n\nEnter the New Device MAC/UID:`);
+        if (!newUid || newUid.trim() === '') return;
+        if (newUid.trim() === oldUid) return alert("New UID cannot be the same as the old one.");
+
+        if(!confirm(`Are you sure you want to transfer all data from ${oldUid} to ${newUid}? This action cannot be undone.`)) return;
+
+        try {
+            const res = await fetch(`${getBaseUrl()}/api/admin/device/replace/${oldUid}`, {
+                method: 'PUT',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${authToken}`
+                },
+                body: JSON.stringify({ newUid: newUid.trim() })
+            });
+            const data = await safeFetchParse(res);
+            if (res.ok) {
+                alert("Device replaced successfully!");
+                fetchMyDevices(); // refresh list
+            } else {
+                alert("Error: " + (data.message || "Replacement failed. Check if you have admin privileges."));
+            }
+        } catch(err) {
+            alert("Network Error: " + err.message);
+        }
+    }
+
+    async function downloadBackup() {
+        const uid = document.getElementById('rangeUid').value.trim();
+        const resEl = document.getElementById('rangeRes');
+        
+        if (!uid) {
+            resEl.style.display = 'block';
+            setResponse('rangeRes', 'Error: Target Device UID is required for backup', true);
+            return;
+        }
+
+        try {
+            resEl.style.display = 'block';
+            document.getElementById('tableContainer').style.display = 'none';
+            setResponse('rangeRes', `Starting backup for ${uid}...`);
+
+            const res = await fetch(`${getBaseUrl()}/api/user/backup/start`, {
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${authToken}`
+                },
+                body: JSON.stringify({ uid })
+            });
+            const data = await safeFetchParse(res);
+            
+            if (res.ok && data.jobId) {
+                setResponse('rangeRes', `Backup Job Created: ${data.jobId}. Waiting for completion...`);
+                // Listen to SSE
+                const eventSource = new EventSource(`${getBaseUrl()}/api/user/backup/status/${data.jobId}?token=${authToken}`);
+                
+                eventSource.onmessage = (e) => {
+                    const statusData = JSON.parse(e.data);
+                    if (statusData.status === 'done') {
+                        setResponse('rangeRes', `Backup completed! Download should start automatically.`);
+                        eventSource.close();
+                        // Trigger download
+                        window.location.href = `${getBaseUrl()}${statusData.download}`;
+                    } else if (statusData.status === 'error') {
+                        setResponse('rangeRes', `Backup Error: ${statusData.error}`, true);
+                        eventSource.close();
+                    } else {
+                        setResponse('rangeRes', `Backup Status: ${statusData.status} (${statusData.progress}%)`);
+                    }
+                };
+                
+                eventSource.onerror = (err) => {
+                    console.error("SSE Error:", err);
+                    setResponse('rangeRes', `Error tracking backup status.`, true);
+                    eventSource.close();
+                };
+            } else {
+                setResponse('rangeRes', data, !res.ok);
+            }
+        } catch(err) {
+            setResponse('rangeRes', "Network Error: " + err.message, true);
         }
     }
 

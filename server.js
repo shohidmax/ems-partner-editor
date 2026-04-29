@@ -468,6 +468,112 @@ userRouter.post('/device/add', async (req, res) => {
     res.send({ success: true, message: 'Device Added' });
 });
 
+userRouter.post('/backup/start', async (req, res) => {
+    const { uid } = req.body;
+    if (!uid) return res.status(400).send({ message: 'UID required' });
+    
+    const user = await req.db.collection('users').findOne({ _id: new ObjectId(req.user.userId) });
+    if (!user || !user.devices || !user.devices.includes(String(uid))) {
+        if (!user.isAdmin && process.env.ADMIN_EMAIL !== user.email) {
+            return res.status(403).send({ message: 'Not authorized for this device' });
+        }
+    }
+
+    const q = { uid: String(uid) };
+    const jobId = randomUUID();
+    const tmpDir = path.join(os.tmpdir(), `esp-backup-${jobId}`);
+    fs.mkdirSync(tmpDir, { recursive: true });
+    
+    const job = { status: 'pending', progress: 0, tmpDir, zipPath: path.join(tmpDir, 'espdata.zip') };
+    backupJobs.set(jobId, job);
+
+    res.send({ jobId });
+
+    (async () => {
+        try {
+            job.status = 'exporting';
+            const total = await req.db.collection('espdata2').countDocuments(q);
+            const out = fs.createWriteStream(path.join(tmpDir, 'espdata.json'), { encoding: 'utf8' });
+            out.write('[');
+            let first = true, written = 0;
+            for await (const doc of req.db.collection('espdata2').find(q).sort({ receivedAt: 1 })) {
+                if (!first) out.write(',');
+                const clean = { 
+                    uid: doc.uid, timestamp: doc.timestamp, dateTime: doc.dateTime,
+                    pssensor: doc.pssensor, environment: doc.environment, rain: doc.rain,
+                    receivedAt: doc.receivedAt
+                };
+                out.write(JSON.stringify(clean));
+                first = false; written++;
+                if (total > 0) job.progress = Math.floor((written / total) * 90);
+            }
+            out.write(']'); out.end();
+            await new Promise(r => out.on('finish', r));
+
+            job.status = 'zipping';
+            const output = fs.createWriteStream(job.zipPath);
+            const archive = archiver('zip', { zlib: { level: 9 } });
+            archive.pipe(output);
+            archive.file(path.join(tmpDir, 'espdata.json'), { name: 'espdata.json' });
+            await archive.finalize();
+            await new Promise(r => output.on('close', r));
+
+            job.status = 'done'; job.progress = 100; job.finishedAt = new Date();
+            job.downloadUrl = `/api/user/backup/download/${jobId}`;
+
+        } catch (err) { job.status = 'error'; job.error = err.message; job.finishedAt = new Date(); }
+    })();
+});
+
+userRouter.get('/backup/status/:jobId', (req, res) => {
+    const jobId = req.params.jobId;
+    const token = req.query.token;
+
+    if (!token) return res.status(401).send({ message: 'Token missing' });
+    
+    jwt.verify(token, JWT_SECRET, (err, decoded) => {
+        if (err) return res.status(403).send({ message: 'Invalid token' });
+
+        const job = backupJobs.get(jobId);
+        if(!job) return res.status(404).send({message: 'Not found'});
+        
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+
+        const sendEvent = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+
+        sendEvent({ status: job.status, progress: job.progress, error: job.error });
+
+        if (job.status === 'done' || job.status === 'error') {
+            if (job.status === 'done') sendEvent({ status: 'done', progress: 100, download: job.downloadUrl });
+            return res.end();
+        }
+
+        const iv = setInterval(() => {
+            const currentJob = backupJobs.get(jobId);
+            if (!currentJob) {
+                clearInterval(iv);
+                return res.end();
+            }
+            sendEvent({ status: currentJob.status, progress: currentJob.progress, error: currentJob.error });
+            if (currentJob.status === 'done' || currentJob.status === 'error') {
+                if (currentJob.status === 'done') sendEvent({ status: 'done', progress: 100, download: currentJob.downloadUrl });
+                clearInterval(iv);
+                res.end();
+            }
+        }, 1000);
+
+        req.on('close', () => clearInterval(iv));
+    });
+});
+
+userRouter.get('/backup/download/:jobId', (req, res) => {
+    const job = backupJobs.get(req.params.jobId);
+    if (!job || job.status !== 'done') return res.status(400).send('Not ready or invalid job ID');
+    res.download(job.zipPath, 'espdata.zip');
+});
+
 userRouter.post('/password/change', async (req, res) => {
     try {
         const { oldPassword, newPassword } = req.body;
@@ -566,6 +672,69 @@ adminRouter.put('/device/:uid', async (req, res) => {
     } catch (error) {
         console.error('Error in /api/admin/device/:uid (PUT):', error);
         res.status(500).send({ success: false, message: 'Internal server error' });
+    }
+});
+
+// Device Replace / MAC Update Route
+adminRouter.put('/device/replace/:oldUid', async (req, res) => {
+    try {
+        const { oldUid } = req.params;
+        const { newUid } = req.body;
+        
+        if (!newUid || typeof newUid !== 'string') {
+            return res.status(400).send({ success: false, message: 'newUid is required and must be a string' });
+        }
+        
+        if (oldUid === newUid) {
+            return res.status(400).send({ success: false, message: 'oldUid and newUid must be different' });
+        }
+
+        // Check if old device exists
+        const oldDevice = await req.db.collection('devices').findOne({ uid: oldUid });
+        if (!oldDevice) {
+            return res.status(404).send({ success: false, message: 'Old device not found' });
+        }
+
+        // Check if new device already exists to avoid conflict
+        const newDeviceExists = await req.db.collection('devices').findOne({ uid: newUid });
+        if (newDeviceExists) {
+            return res.status(400).send({ success: false, message: 'New device UID already exists in database' });
+        }
+
+        // 1. Update espdata2 collection
+        await req.db.collection('espdata2').updateMany(
+            { uid: oldUid },
+            { $set: { uid: newUid } }
+        );
+
+        // 2. Update devices collection
+        await req.db.collection('devices').updateOne(
+            { uid: oldUid },
+            { $set: { uid: newUid } }
+        );
+
+        // 3. Update users collection (replace oldUid with newUid in devices array)
+        // Find all users who have the oldUid in their devices array
+        const usersToUpdate = await req.db.collection('users').find({ devices: oldUid }).toArray();
+        for (const user of usersToUpdate) {
+            await req.db.collection('users').updateOne(
+                { _id: user._id },
+                { 
+                    $pull: { devices: oldUid } 
+                }
+            );
+            await req.db.collection('users').updateOne(
+                { _id: user._id },
+                { 
+                    $addToSet: { devices: newUid } 
+                }
+            );
+        }
+
+        res.send({ success: true, message: `Device ${oldUid} successfully replaced with ${newUid}` });
+    } catch (error) {
+        console.error('Error in /api/admin/device/replace/:oldUid:', error);
+        res.status(500).send({ success: false, message: 'Internal server error during device replacement' });
     }
 });
 
