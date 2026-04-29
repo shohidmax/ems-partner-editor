@@ -686,7 +686,7 @@
                                     <span style="font-size: 0.7rem; font-weight: bold; color: ${dotColor}; background: ${isOnline?'rgba(16, 185, 129, 0.1)':'rgba(239, 68, 68, 0.1)'}; padding: 0.25rem 0.5rem; border-radius:1rem;">● ${dev.status ? dev.status.toUpperCase() : 'OFFLINE'}</span>
                                 </div>
                                 <div style="font-size: 0.75rem; color: var(--text-muted); font-family: monospace; background: rgba(0,0,0,0.2); padding: 0.5rem; border-radius: 0.5rem; width:100%; text-align:center;">${dev.uid}</div>
-                                <button class="btn-sm btn-outline" style="width:100%; margin-top: 0.75rem; border-color:var(--primary); color:var(--text-main);" onclick="event.stopPropagation(); promptReplaceDevice('${dev.uid}')"><span class="material-icons-round" style="vertical-align:middle; font-size:1rem; margin-right:0.2rem;">swap_horiz</span> Replace Device</button>
+                                <button class="btn-sm btn-outline" style="width:100%; margin-top: 0.75rem; border-color:var(--primary); color:var(--text-main);" onclick="event.stopPropagation(); promptReplaceDevice('${dev.uid}')"><span class="material-icons-round" style="vertical-align:middle; font-size:1rem; margin-right:0.2rem;">swap_horiz</span> Device Transfer</button>
                             </div>
                         `;
                     });
@@ -873,7 +873,7 @@
 
     // --- NEW FEATURES ---
     async function promptReplaceDevice(oldUid) {
-        const newUid = prompt(`Replace Device: ${oldUid}\n\nEnter the New Device MAC/UID:`);
+        const newUid = prompt(`Device Transfer: ${oldUid}\n\nEnter the New Device MAC/UID:`);
         if (!newUid || newUid.trim() === '') return;
         if (newUid.trim() === oldUid) return alert("New UID cannot be the same as the old one.");
 
