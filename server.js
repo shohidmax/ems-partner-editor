@@ -574,6 +574,42 @@ userRouter.get('/backup/download/:jobId', (req, res) => {
     res.download(job.zipPath, 'espdata.zip');
 });
 
+userRouter.get('/export/json/:uid', async (req, res) => {
+    const { uid } = req.params;
+    
+    try {
+        const user = await req.db.collection('users').findOne({ _id: new ObjectId(req.user.userId) });
+        if (!user || !user.devices || !user.devices.includes(String(uid))) {
+            if (!user.isAdmin && process.env.ADMIN_EMAIL !== user.email) {
+                return res.status(403).send({ message: 'Not authorized for this device' });
+            }
+        }
+
+        res.setHeader('Content-disposition', `attachment; filename=export_${uid}.json`);
+        res.setHeader('Content-type', 'application/json');
+
+        const cursor = req.db.collection('espdata2').find({ uid: String(uid) }).sort({ receivedAt: 1 });
+        
+        res.write('[');
+        let first = true;
+        for await (const doc of cursor) {
+            if (!first) res.write(',');
+            delete doc._id; // Remove _id if it's there
+            res.write(JSON.stringify(doc));
+            first = false;
+        }
+        res.write(']');
+        res.end();
+    } catch (error) {
+        console.error('Error in /export/json/:uid:', error);
+        if (!res.headersSent) {
+            res.status(500).send({ success: false, message: 'Server error during export' });
+        } else {
+            res.end();
+        }
+    }
+});
+
 userRouter.post('/password/change', async (req, res) => {
     try {
         const { oldPassword, newPassword } = req.body;
@@ -737,6 +773,68 @@ adminRouter.put('/device/replace/:oldUid', async (req, res) => {
         res.status(500).send({ success: false, message: 'Internal server error during device replacement' });
     }
 });
+
+// Device Clone Route (Copy data without deleting old, create new device if needed)
+adminRouter.post('/device/clone', async (req, res) => {
+    try {
+        const { sourceUid, targetUid } = req.body;
+        
+        if (!sourceUid || !targetUid || typeof sourceUid !== 'string' || typeof targetUid !== 'string') {
+            return res.status(400).send({ success: false, message: 'sourceUid and targetUid are required and must be strings' });
+        }
+        
+        if (sourceUid === targetUid) {
+            return res.status(400).send({ success: false, message: 'sourceUid and targetUid must be different' });
+        }
+
+        // Fetch source data
+        const sourceData = await req.db.collection('espdata2').find({ uid: sourceUid }).toArray();
+        if (sourceData.length === 0) {
+            return res.status(404).send({ success: false, message: 'No data found for source UID' });
+        }
+
+        // Clone data, modifying UID and removing original _id
+        const clonedData = sourceData.map(doc => {
+            const { _id, ...rest } = doc;
+            return { ...rest, uid: targetUid };
+        });
+
+        // Insert cloned data
+        await req.db.collection('espdata2').insertMany(clonedData, { ordered: false });
+
+        // Ensure target device exists in devices collection
+        const targetDeviceExists = await req.db.collection('devices').findOne({ uid: targetUid });
+        if (!targetDeviceExists) {
+            const sourceDevice = await req.db.collection('devices').findOne({ uid: sourceUid });
+            const newDevice = {
+                uid: targetUid,
+                status: 'offline',
+                addedAt: new Date(),
+                name: `Device-${targetUid}`
+            };
+            if (sourceDevice) {
+                if (sourceDevice.location) newDevice.location = sourceDevice.location;
+                if (sourceDevice.institution) newDevice.institution = sourceDevice.institution;
+            }
+            await req.db.collection('devices').insertOne(newDevice);
+        }
+
+        // Update users who have sourceUid to also have targetUid
+        const usersToUpdate = await req.db.collection('users').find({ devices: sourceUid }).toArray();
+        for (const user of usersToUpdate) {
+            await req.db.collection('users').updateOne(
+                { _id: user._id },
+                { $addToSet: { devices: targetUid } }
+            );
+        }
+
+        res.send({ success: true, message: `Successfully cloned ${sourceData.length} records from ${sourceUid} to ${targetUid}.` });
+    } catch (error) {
+        console.error('Error in /api/admin/device/clone:', error);
+        res.status(500).send({ success: false, message: 'Internal server error during device cloning' });
+    }
+});
+
 
 
 adminRouter.get('/users', async (req, res) => {

@@ -334,6 +334,14 @@
                 <span class="material-icons-round">table_chart</span>
                 Historical Data
             </div>
+            <div class="nav-link" onclick="switchTab('transfer')">
+                <span class="material-icons-round">swap_horiz</span>
+                Transfer Data
+            </div>
+            <div class="nav-link" onclick="switchTab('export')">
+                <span class="material-icons-round">download</span>
+                Export Data
+            </div>
             <div class="nav-link" onclick="switchTab('tools')">
                 <span class="material-icons-round">build</span>
                 Developer Tools
@@ -442,6 +450,50 @@
                     
                     <div class="response-area" id="rangeRes" style="display:none;"></div>
                     <div class="table-responsive" id="tableContainer" style="display:none;"></div>
+                </div>
+            </div>
+
+            <!-- ====== TRANSFER DATA TAB ====== -->
+            <div id="transfer" class="tab-pane">
+                <div class="card">
+                    <div class="card-header">Clone & Transfer Device Data</div>
+                    <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1.5rem;">
+                        This will copy all data from the Source Device to the Target Device. The Target Device's existing data will NOT be deleted. A JSON backup of both devices will be automatically downloaded before the transfer begins.
+                    </p>
+                    
+                    <div class="grid grid-2" style="margin-bottom: 1.5rem;">
+                        <div>
+                            <label style="font-size:0.8rem; color:var(--text-muted);">Source Device UID/MAC</label>
+                            <input type="text" id="transferSourceUid" placeholder="e.g. OLD-DEV-01">
+                        </div>
+                        <div>
+                            <label style="font-size:0.8rem; color:var(--text-muted);">Target Device UID/MAC</label>
+                            <input type="text" id="transferTargetUid" placeholder="e.g. NEW-DEV-02">
+                        </div>
+                    </div>
+                    
+                    <button onclick="executeTransferData()" style="background: var(--warning); color: #000;"><span class="material-icons-round" style="vertical-align:middle; font-size:1.2rem; margin-right:0.5rem;">auto_mode</span> Execute Transfer</button>
+                    
+                    <div class="response-area" id="transferRes" style="display:none;"></div>
+                </div>
+            </div>
+
+            <!-- ====== EXPORT DATA TAB ====== -->
+            <div id="export" class="tab-pane">
+                <div class="card">
+                    <div class="card-header">Export Device Telemetry</div>
+                    <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1.5rem;">
+                        Select a device to download its full telemetry history in JSON format.
+                    </p>
+                    
+                    <div style="margin-bottom: 1.5rem;">
+                        <label style="font-size:0.8rem; color:var(--text-muted);">Device UID/MAC</label>
+                        <input type="text" id="exportDeviceUid" placeholder="e.g. TEST-DEV-01" style="max-width: 400px; display: block;">
+                    </div>
+                    
+                    <button onclick="executeFullExport()" style="max-width: 400px; display: block; background: var(--success);"><span class="material-icons-round" style="vertical-align:middle; font-size:1.2rem; margin-right:0.5rem;">download</span> Download JSON</button>
+                    
+                    <div class="response-area" id="exportRes" style="display:none; max-width: 400px;"></div>
                 </div>
             </div>
 
@@ -562,6 +614,8 @@
             'dashboard': 'Dashboard Overview',
             'devices': 'Fleet Management',
             'data': 'Telemetry Explorer',
+            'transfer': 'Transfer Data',
+            'export': 'Export Data',
             'tools': 'Developer API Tools'
         };
         document.getElementById('topbarTitle').innerText = titles[tabId];
@@ -955,6 +1009,109 @@
             }
         } catch(err) {
             setResponse('rangeRes', "Network Error: " + err.message, true);
+        }
+    }
+
+    // --- TRANSFER AND EXPORT FEATURES ---
+    async function downloadJsonBlob(uid, filenamePrefix) {
+        const res = await fetch(`${getBaseUrl()}/api/user/export/json/${uid}`, {
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        if (!res.ok) {
+            const err = await safeFetchParse(res);
+            throw new Error(err.message || `Failed to export ${uid}`);
+        }
+        const blob = await res.blob();
+        if (blob.size === 0 || (blob.size < 10 && await blob.text() === "[]")) {
+            console.log(`No data found for ${uid}, skipping download.`);
+            return false;
+        }
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${filenamePrefix}_${uid}_${new Date().toISOString().replace(/:/g, '-')}.json`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        return true;
+    }
+
+    async function executeFullExport() {
+        const uid = document.getElementById('exportDeviceUid').value.trim();
+        const resEl = document.getElementById('exportRes');
+        
+        if (!uid) {
+            resEl.style.display = 'block';
+            setResponse('exportRes', 'Error: Device UID is required', true);
+            return;
+        }
+
+        try {
+            resEl.style.display = 'block';
+            setResponse('exportRes', `Starting export for ${uid}...`);
+
+            const exported = await downloadJsonBlob(uid, 'export');
+            if (exported) {
+                setResponse('exportRes', `Export completed successfully!`);
+            } else {
+                setResponse('exportRes', `No data found for ${uid}.`, true);
+            }
+        } catch(err) {
+            setResponse('exportRes', "Export Error: " + err.message, true);
+        }
+    }
+
+    async function executeTransferData() {
+        const sourceUid = document.getElementById('transferSourceUid').value.trim();
+        const targetUid = document.getElementById('transferTargetUid').value.trim();
+        const resEl = document.getElementById('transferRes');
+
+        if (!sourceUid || !targetUid) {
+            resEl.style.display = 'block';
+            setResponse('transferRes', 'Error: Both Source and Target Device UIDs are required.', true);
+            return;
+        }
+
+        if (sourceUid === targetUid) {
+            resEl.style.display = 'block';
+            setResponse('transferRes', 'Error: Source and Target UIDs must be different.', true);
+            return;
+        }
+
+        if(!confirm(`Are you sure you want to clone data from ${sourceUid} to ${targetUid}? JSON backups will be downloaded first.`)) return;
+
+        try {
+            resEl.style.display = 'block';
+            setResponse('transferRes', `Step 1/3: Downloading Source JSON Backup...`);
+            await downloadJsonBlob(sourceUid, 'backup_source');
+
+            setResponse('transferRes', `Step 2/3: Downloading Target JSON Backup (if any)...`);
+            try {
+                await downloadJsonBlob(targetUid, 'backup_target');
+            } catch(e) {
+                console.log("Target device might not have data yet or error: " + e.message);
+            }
+
+            setResponse('transferRes', `Step 3/3: Cloning data from ${sourceUid} to ${targetUid}...`);
+            const res = await fetch(`${getBaseUrl()}/api/admin/device/clone`, {
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${authToken}`
+                },
+                body: JSON.stringify({ sourceUid, targetUid })
+            });
+            
+            const data = await safeFetchParse(res);
+            if (res.ok) {
+                setResponse('transferRes', `Success: ${data.message}`);
+                fetchMyDevices(); // refresh device list in background
+            } else {
+                setResponse('transferRes', "Error: " + (data.message || "Transfer failed. Check if you have admin privileges."), true);
+            }
+        } catch(err) {
+            setResponse('transferRes', "Transfer Error: " + err.message, true);
         }
     }
 
