@@ -464,10 +464,12 @@
                     <div class="grid grid-2" style="margin-bottom: 1.5rem;">
                         <div>
                             <label style="font-size:0.8rem; color:var(--text-muted);">Source Device UID/MAC</label>
-                            <input type="text" id="transferSourceUid" placeholder="e.g. OLD-DEV-01">
+                            <select id="transferSourceUid">
+                                <option value="">-- Login to load devices --</option>
+                            </select>
                         </div>
                         <div>
-                            <label style="font-size:0.8rem; color:var(--text-muted);">Target Device UID/MAC</label>
+                            <label style="font-size:0.8rem; color:var(--text-muted);">Target Device UID/MAC (New or Existing)</label>
                             <input type="text" id="transferTargetUid" placeholder="e.g. NEW-DEV-02">
                         </div>
                     </div>
@@ -487,8 +489,10 @@
                     </p>
                     
                     <div style="margin-bottom: 1.5rem;">
-                        <label style="font-size:0.8rem; color:var(--text-muted);">Device UID/MAC</label>
-                        <input type="text" id="exportDeviceUid" placeholder="e.g. TEST-DEV-01" style="max-width: 400px; display: block;">
+                        <label style="font-size:0.8rem; color:var(--text-muted);">Select Device</label>
+                        <select id="exportDeviceUid" style="max-width: 400px; display: block;">
+                            <option value="">-- Login to load devices --</option>
+                        </select>
                     </div>
                     
                     <button onclick="executeFullExport()" style="max-width: 400px; display: block; background: var(--success);"><span class="material-icons-round" style="vertical-align:middle; font-size:1.2rem; margin-right:0.5rem;">download</span> Download JSON</button>
@@ -721,6 +725,22 @@
 
             const devices = await safeFetchParse(res);
             if(res.ok && Array.isArray(devices)) {
+                // Populate dropdowns for Transfer and Export
+                const sourceSelect = document.getElementById('transferSourceUid');
+                const exportSelect = document.getElementById('exportDeviceUid');
+                if(sourceSelect) {
+                    sourceSelect.innerHTML = '<option value="">-- Select Device --</option>';
+                    devices.forEach(dev => {
+                        sourceSelect.innerHTML += `<option value="${dev.uid}">${dev.name || 'Device'} (${dev.uid})</option>`;
+                    });
+                }
+                if(exportSelect) {
+                    exportSelect.innerHTML = '<option value="">-- Select Device --</option>';
+                    devices.forEach(dev => {
+                        exportSelect.innerHTML += `<option value="${dev.uid}">${dev.name || 'Device'} (${dev.uid})</option>`;
+                    });
+                }
+
                 listEl.innerHTML = '';
                 if (devices.length === 0) {
                     listEl.innerHTML = '<div style="color:var(--text-muted); font-size: 0.875rem; padding:1rem;">No devices found.</div>';
@@ -844,7 +864,10 @@
             html += `<td>${wl}</td>`;
             html += `<td>${rain}</td>`;
             if (row._id) {
-                html += `<td><button class="btn-sm btn-outline" style="min-width: 60px;" onclick="editRow(this)">Edit</button></td>`;
+                html += `<td style="display: flex; gap: 0.5rem; align-items: center;">
+                    <button class="btn-sm btn-outline" style="min-width: 60px;" onclick="editRow(this)">Edit</button>
+                    <button class="btn-sm btn-outline btn-danger" style="min-width: 60px; padding: 0.2rem 0.5rem;" onclick="deleteRow(this)">Delete</button>
+                </td>`;
             } else {
                 html += `<td>-</td>`;
             }
@@ -922,6 +945,37 @@
         } catch (e) {
             alert("Network Error: " + e.message);
             btn.innerText = "Edit";
+        }
+    }
+
+    async function deleteRow(btn) {
+        const tr = btn.closest('tr');
+        const id = tr.getAttribute('data-id');
+        
+        if(!confirm("Are you sure you want to delete this record? This action cannot be undone.")) return;
+        
+        const originalText = btn.innerText;
+        btn.innerText = "...";
+        
+        try {
+            const res = await fetch(`${getBaseUrl()}/api/public/device/data/${id}`, {
+                method: 'DELETE',
+                headers: { 
+                    'Authorization': `Bearer ${authToken}`
+                }
+            });
+            
+            if (res.ok) {
+                tr.style.opacity = '0.5';
+                setTimeout(() => tr.remove(), 300);
+            } else {
+                const data = await safeFetchParse(res);
+                alert("Error: " + (data.message || "Failed to delete"));
+                btn.innerText = originalText;
+            }
+        } catch (e) {
+            alert("Network Error: " + e.message);
+            btn.innerText = originalText;
         }
     }
 
@@ -1119,6 +1173,7 @@
     updateTokenDisplay();
     if(authToken) {
         getAdminStats();
+        fetchMyDevices();
     }
 </script>
 

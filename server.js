@@ -349,6 +349,23 @@ publicRouter.put('/device/data/:id', authenticateJWT, async (req, res) => {
     }
 });
 
+publicRouter.delete('/device/data/:id', authenticateJWT, async (req, res) => {
+    try {
+        const { id } = req.params;
+        if (!ObjectId.isValid(id)) return res.status(400).send({ success: false, message: 'Invalid ID' });
+
+        const result = await req.db.collection('espdata2').deleteOne({ _id: new ObjectId(id) });
+
+        if (result.deletedCount === 0) {
+            return res.status(404).send({ success: false, message: 'Record not found.' });
+        }
+        res.send({ success: true, message: 'Data deleted successfully.' });
+    } catch (error) {
+        console.error('Error deleting data:', error);
+        res.status(500).send({ success: false, message: 'Internal server error' });
+    }
+});
+
 // ৩. অথেন্টিকেশন রাউটস
 const authRouter = express.Router();
 
