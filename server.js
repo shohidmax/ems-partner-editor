@@ -354,12 +354,20 @@ publicRouter.delete('/device/data/:id', authenticateJWT, async (req, res) => {
         const { id } = req.params;
         if (!ObjectId.isValid(id)) return res.status(400).send({ success: false, message: 'Invalid ID' });
 
-        const result = await req.db.collection('espdata2').deleteOne({ _id: new ObjectId(id) });
+        const doc = await req.db.collection('espdata2').findOne({ _id: new ObjectId(id) });
+        if (!doc) return res.status(404).send({ success: false, message: 'Record not found.' });
 
-        if (result.deletedCount === 0) {
-            return res.status(404).send({ success: false, message: 'Record not found.' });
-        }
-        res.send({ success: true, message: 'Data deleted successfully.' });
+        await req.db.collection('trash').insertOne({
+            type: 'telemetry',
+            originalId: doc._id,
+            document: doc,
+            deletedBy: req.user.userId,
+            deletedAt: new Date()
+        });
+
+        await req.db.collection('espdata2').deleteOne({ _id: new ObjectId(id) });
+
+        res.send({ success: true, message: 'Data moved to trash.' });
     } catch (error) {
         console.error('Error deleting data:', error);
         res.status(500).send({ success: false, message: 'Internal server error' });
@@ -647,6 +655,108 @@ userRouter.post('/password/change', async (req, res) => {
     }
 });
 
+// --- TRASH ROUTES ---
+userRouter.get('/trash', async (req, res) => {
+    try {
+        const user = await req.db.collection('users').findOne({ _id: new ObjectId(req.user.userId) });
+        const isAdmin = user && (user.isAdmin || process.env.ADMIN_EMAIL === user.email);
+        
+        const query = isAdmin ? {} : { deletedBy: req.user.userId };
+        const items = await req.db.collection('trash').find(query).sort({ deletedAt: -1 }).toArray();
+        res.send(items);
+    } catch (e) {
+        res.status(500).send({ error: e.message });
+    }
+});
+
+userRouter.post('/trash/restore/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        if (!ObjectId.isValid(id)) return res.status(400).send({ message: 'Invalid ID' });
+
+        const trashItem = await req.db.collection('trash').findOne({ _id: new ObjectId(id) });
+        if (!trashItem) return res.status(404).send({ message: 'Item not found in trash' });
+
+        if (trashItem.type === 'telemetry') {
+            await req.db.collection('espdata2').insertOne(trashItem.document);
+        } else if (trashItem.type === 'device') {
+            // Restore device
+            const exists = await req.db.collection('devices').findOne({ uid: trashItem.document.uid });
+            if (!exists) {
+                await req.db.collection('devices').insertOne(trashItem.document);
+            }
+            // Restore ownership
+            if (trashItem.owners && trashItem.owners.length > 0) {
+                const ownerIds = trashItem.owners.map(oid => new ObjectId(oid));
+                await req.db.collection('users').updateMany(
+                    { _id: { $in: ownerIds } },
+                    { $addToSet: { devices: trashItem.document.uid } }
+                );
+            }
+        }
+
+        await req.db.collection('trash').deleteOne({ _id: new ObjectId(id) });
+        res.send({ success: true, message: 'Restored successfully' });
+    } catch (e) {
+        res.status(500).send({ error: e.message });
+    }
+});
+
+userRouter.delete('/trash/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        if (!ObjectId.isValid(id)) return res.status(400).send({ message: 'Invalid ID' });
+
+        const result = await req.db.collection('trash').deleteOne({ _id: new ObjectId(id) });
+        if (result.deletedCount === 0) return res.status(404).send({ message: 'Not found' });
+        
+        res.send({ success: true, message: 'Permanently deleted' });
+    } catch (e) {
+        res.status(500).send({ error: e.message });
+    }
+});
+
+userRouter.delete('/device/:uid', async (req, res) => {
+    try {
+        const { uid } = req.params;
+        const user = await req.db.collection('users').findOne({ _id: new ObjectId(req.user.userId) });
+        const isAdmin = user && (user.isAdmin || process.env.ADMIN_EMAIL === user.email);
+
+        if (!isAdmin && (!user.devices || !user.devices.includes(uid))) {
+            return res.status(403).send({ message: 'Not authorized to delete this device' });
+        }
+
+        const device = await req.db.collection('devices').findOne({ uid: String(uid) });
+        if (!device) return res.status(404).send({ message: 'Device not found' });
+
+        // Find all users who own this device to restore later
+        const owners = await req.db.collection('users').find({ devices: String(uid) }).toArray();
+        const ownerIds = owners.map(o => o._id);
+
+        // Move to trash
+        await req.db.collection('trash').insertOne({
+            type: 'device',
+            originalId: device._id,
+            document: device,
+            owners: ownerIds,
+            deletedBy: req.user.userId,
+            deletedAt: new Date()
+        });
+
+        // Delete from devices collection
+        await req.db.collection('devices').deleteOne({ uid: String(uid) });
+
+        // Remove from all users' devices arrays
+        await req.db.collection('users').updateMany(
+            { devices: String(uid) },
+            { $pull: { devices: String(uid) } }
+        );
+
+        res.send({ success: true, message: 'Device moved to trash' });
+    } catch (e) {
+        res.status(500).send({ error: e.message });
+    }
+});
 
 // ৫. অ্যাডমিন রাউটস
 const adminRouter = express.Router();
