@@ -17,7 +17,7 @@ const nodemailer = require('nodemailer');
 const crypto = require('crypto');
 require('dotenv').config();
 
-// --- কনফিগারেশন cfdcccccccccccccdddএবং ধ্রুবক ---
+// --- কনফিগারেশন cfdccwqwqcccccccccccdddএবং ধ্রুবক ---
 const PORT = process.env.PORT || 3002;
 const JWT_SECRET = process.env.JWT_SECRET || 'default_secret_please_change';
 const MONGODB_URI = process.env.MONGODB_URI;
