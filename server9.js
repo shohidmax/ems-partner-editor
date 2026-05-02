@@ -20,7 +20,7 @@ require('dotenv').config();
 
 // --- গ্লোবাল dddddddvvvvvvvvvvvvvvvvvvvddddddddddddddddddভেরিয়েবল ---
 const JWT_SECRET = process.env.JWT_SECRET || 'please_change_this_secret';
-const BATCH_INTERVAL_MS = 10000; // ১০ সেকেন্ড পর পর ব্যাচ সেভ হবে
+const BATCH_INTERVAL_MS = 10000; // ১০ সেকেsdsddddddddddddddddddddddddন্ড পর পর ব্যাচ সেভ হবে
 const FILTER_INTERVAL_MS = 10 * 60 * 1000;
 const OFFLINE_THRESHOLD_MS = 10 * 60 * 1000;
 const CHECK_OFFLINE_INTERVAL_MS = 1 * 60 * 1000;
