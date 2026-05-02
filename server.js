@@ -374,6 +374,110 @@ publicRouter.delete('/device/data/:id', authenticateJWT, async (req, res) => {
     }
 });
 
+publicRouter.post('/device/rain/summary', authenticateJWT, async (req, res) => {
+    try {
+        const { uid, start, end } = req.body;
+        if (!uid) return res.status(400).send({ success: false, message: 'uid is required' });
+
+        const query = { uid: String(uid) };
+        if (start && end) {
+            const startDate = new Date(start);
+            const endDate = new Date(end);
+            if (!isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
+                query.receivedAt = { $gte: startDate, $lte: endDate };
+            }
+        }
+
+        const result = await req.db.collection('espdata2').aggregate([
+            { $match: query },
+            { $group: {
+                _id: null,
+                totalRain: { $sum: { $ifNull: ["$rain.mm", { $ifNull: ["$rainfall", 0] }] } },
+                count: { $sum: 1 }
+            }}
+        ]).toArray();
+
+        const data = result.length > 0 ? result[0] : { totalRain: 0, count: 0 };
+        // Round totalRain to 2 decimal places
+        data.totalRain = Math.round(data.totalRain * 100) / 100;
+        
+        res.send({ success: true, ...data });
+    } catch (error) {
+        console.error('Error in /device/rain/summary:', error);
+        res.status(500).send({ success: false, message: 'Server error' });
+    }
+});
+
+publicRouter.post('/device/rain/distribute', authenticateJWT, async (req, res) => {
+    try {
+        const { uid, start, end, totalRain } = req.body;
+        if (!uid || totalRain === undefined) {
+            return res.status(400).send({ success: false, message: 'uid and totalRain are required' });
+        }
+
+        const targetRain = parseFloat(totalRain);
+        if (isNaN(targetRain) || targetRain < 0) {
+             return res.status(400).send({ success: false, message: 'Invalid totalRain value' });
+        }
+
+        const query = { uid: String(uid) };
+        if (start && end) {
+            const startDate = new Date(start);
+            const endDate = new Date(end);
+            if (!isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
+                query.receivedAt = { $gte: startDate, $lte: endDate };
+            }
+        }
+
+        const docs = await req.db.collection('espdata2').find(query).project({ _id: 1 }).toArray();
+        if (docs.length === 0) {
+            return res.status(404).send({ success: false, message: 'No records found in this date range to distribute rain.' });
+        }
+
+        // Randomly distribute targetRain across docs
+        const weights = docs.map(() => Math.random());
+        const totalWeight = weights.reduce((acc, val) => acc + val, 0);
+
+        const bulkOps = [];
+        let distributedSoFar = 0;
+
+        for (let i = 0; i < docs.length; i++) {
+            let rainForThisDoc;
+            if (i === docs.length - 1) {
+                // Ensure exact total for the last one (avoid rounding errors)
+                rainForThisDoc = Math.max(0, targetRain - distributedSoFar);
+                rainForThisDoc = Math.round(rainForThisDoc * 100) / 100;
+            } else {
+                rainForThisDoc = (weights[i] / totalWeight) * targetRain;
+                rainForThisDoc = Math.round(rainForThisDoc * 100) / 100; // Round to 2 decimal places
+                distributedSoFar += rainForThisDoc;
+            }
+
+            bulkOps.push({
+                updateOne: {
+                    filter: { _id: docs[i]._id },
+                    update: {
+                        $set: {
+                            'rain.mm': rainForThisDoc,
+                            'rainfall': rainForThisDoc
+                        }
+                    }
+                }
+            });
+        }
+
+        if (bulkOps.length > 0) {
+            await req.db.collection('espdata2').bulkWrite(bulkOps, { ordered: false });
+        }
+
+        res.send({ success: true, message: `Successfully distributed ${targetRain} mm rain across ${docs.length} records.` });
+    } catch (error) {
+        console.error('Error in /device/rain/distribute:', error);
+        res.status(500).send({ success: false, message: 'Server error' });
+    }
+});
+
+
 // ৩. অথেন্টিকেশন রাউটস
 const authRouter = express.Router();
 
