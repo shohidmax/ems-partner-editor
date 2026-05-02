@@ -477,6 +477,64 @@ publicRouter.post('/device/rain/distribute', authenticateJWT, async (req, res) =
     }
 });
 
+publicRouter.post('/device/waterlevel/randomize', authenticateJWT, async (req, res) => {
+    try {
+        const { uid, start, end, minFt, maxFt } = req.body;
+        if (!uid || minFt === undefined || maxFt === undefined) {
+            return res.status(400).send({ success: false, message: 'uid, minFt, and maxFt are required' });
+        }
+
+        const min = parseFloat(minFt);
+        const max = parseFloat(maxFt);
+        
+        if (isNaN(min) || isNaN(max) || min > max) {
+             return res.status(400).send({ success: false, message: 'Invalid minFt/maxFt values' });
+        }
+
+        const query = { uid: String(uid) };
+        if (start && end) {
+            const startDate = new Date(start);
+            const endDate = new Date(end);
+            if (!isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
+                query.receivedAt = { $gte: startDate, $lte: endDate };
+            }
+        }
+
+        const docs = await req.db.collection('espdata2').find(query).project({ _id: 1 }).toArray();
+        if (docs.length === 0) {
+            return res.status(404).send({ success: false, message: 'No records found in this date range.' });
+        }
+
+        const bulkOps = [];
+
+        for (let i = 0; i < docs.length; i++) {
+            let randomLevel = (Math.random() * (max - min)) + min;
+            randomLevel = Math.round(randomLevel * 100) / 100;
+
+            bulkOps.push({
+                updateOne: {
+                    filter: { _id: docs[i]._id },
+                    update: {
+                        $set: {
+                            'pssensor.depth_ft': randomLevel,
+                            'water_level': randomLevel
+                        }
+                    }
+                }
+            });
+        }
+
+        if (bulkOps.length > 0) {
+            await req.db.collection('espdata2').bulkWrite(bulkOps, { ordered: false });
+        }
+
+        res.send({ success: true, message: `Successfully assigned random water levels (${min} - ${max} ft) across ${docs.length} records.` });
+    } catch (error) {
+        console.error('Error in /device/waterlevel/randomize:', error);
+        res.status(500).send({ success: false, message: 'Server error' });
+    }
+});
+
 
 // ৩. অথেন্টিকেশন রাউটস
 const authRouter = express.Router();

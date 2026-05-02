@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Network Diagnostic Center</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <!-- Firebase Libraries -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, onAuthStateChanged, signInWithCustomToken, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'pro-network-monitor';
+        const firebaseConfig = JSON.parse(__firebase_config);
+        
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        // State Management
+        let user = null;
+        let isMonitoring = true;
+        let targets = [
+            { id: '1', name: 'Cloudflare (Global)', url: 'https://1.1.1.1/favicon.ico', color: '#3b82f6' },
+            { id: '2', name: 'Google (Search)', url: 'https://www.google.com/favicon.ico', color: '#10b981' }
+        ];
+        let stats = { disconnects: 0, totalChecks: 0, successChecks: 0, failedChecks: 0 };
+        let pings = [];
+        let reportData = [];
+
+        // Chart Setup
+        const ctx = document.getElementById('pingChart').getContext('2d');
+        const chart = new Chart(ctx, {
+            type: 'line',
+            data: { labels: [], datasets: [] },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: { beginAtZero: true, title: { display: true, text: 'Latency (ms)' } },
+                    x: { display: false }
+                },
+                plugins: { legend: { position: 'top', labels: { boxWidth: 10, font: { size: 10 } } } }
+            }
+        });
+
+        // Rule 3: Auth First
+        const initAuth = async () => {
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                await signInWithCustomToken(auth, __initial_auth_token);
+            } else {
+                await signInAnonymously(auth);
+            }
+        };
+        initAuth();
+
+        onAuthStateChanged(auth, (u) => {
+            user = u;
+            if (user) {
+                loadSettings();
+                fetchISPInfo();
+            }
+        });
+
+        // ISP and Network Info
+        window.fetchISPInfo = async () => {
+            try {
+                const response = await fetch('https://ipapi.co/json/');
+                const data = await response.json();
+                document.getElementById('ip-address').innerText = data.ip || 'Unknown';
+                document.getElementById('isp-name').innerText = data.org || 'Unknown';
+                document.getElementById('network-location').innerText = `${data.city}, ${data.country_name}`;
+            } catch (e) {
+                document.getElementById('ip-address').innerText = "Blocked/No Data";
+            }
+        };
+
+        async function loadSettings() {
+            const settingsRef = doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'config');
+            const snap = await getDoc(settingsRef);
+            if (snap.exists()) {
+                const data = snap.data();
+                if (data.targets) targets = data.targets;
+                if (data.stats) stats = data.stats;
+                updateStatsUI();
+            }
+            renderTargetList();
+            initChartDatasets();
+        }
+
+        function initChartDatasets() {
+            chart.data.datasets = targets.map(t => ({
+                label: t.name,
+                data: [],
+                borderColor: t.color,
+                backgroundColor: t.color + '11',
+                borderWidth: 2,
+                tension: 0.4,
+                pointRadius: 0
+            }));
+            chart.update();
+        }
+
+        // --- Core Diagnostic Engine ---
+        async function measurePing(url) {
+            const start = Date.now();
+            try {
+                // Method 1: Fetch
+                const response = await fetch(url + '?t=' + start, { mode: 'no-cors', cache: 'no-store' });
+                return Date.now() - start;
+            } catch (e) {
+                // Method 2: Image Fallback
+                return new Promise((resolve) => {
+                    const img = new Image();
+                    img.onload = () => resolve(Date.now() - start);
+                    img.onerror = () => resolve(null);
+                    img.src = url + '?t=' + start;
+                    setTimeout(() => resolve(null), 3000);
+                });
+            }
+        }
+
+        window.runSpeedTest = async () => {
+            const statusEl = document.getElementById('diag-status');
+            statusEl.innerText = "Speed Test cholche...";
+            const start = Date.now();
+            // Fetching a larger asset to estimate bandwidth (e.g., Google Logo)
+            const testUrl = 'https://www.google.com/images/branding/googlelogo/2x/googlelogo_color_272x92dp.png';
+            try {
+                const res = await fetch(testUrl, { mode: 'no-cors', cache: 'no-store' });
+                const end = Date.now();
+                const duration = (end - start) / 1000;
+                // Roughly ~20KB file
+                const mbps = ((20 * 8) / 1024) / duration; 
+                document.getElementById('est-speed').innerText = mbps.toFixed(2) + " Mbps*";
+                statusEl.innerText = "Speed Test sesh.";
+            } catch (e) {
+                document.getElementById('est-speed').innerText = "Fail";
+            }
+        };
+
+        window.runFullDiagnostics = async () => {
+            if (!isMonitoring) return;
+            document.getElementById('diag-btn').classList.add('opacity-50', 'pointer-events-none');
+            const statusEl = document.getElementById('diag-status');
+            
+            // 1. DNS Speed Check
+            statusEl.innerText = "DNS Speed check kora hochche...";
+            const dnsStart = Date.now();
+            await measurePing('https://dns.google/resolve?name=example.com');
+            const dnsTime = Date.now() - dnsStart;
+            document.getElementById('dns-speed').innerText = dnsTime + " ms";
+
+            // 2. Packet Loss Calculation
+            const loss = stats.totalChecks > 0 ? ((stats.failedChecks / stats.totalChecks) * 100).toFixed(1) : 0;
+            document.getElementById('packet-loss').innerText = loss + "%";
+            
+            // 3. Jitter Calculation (Variation in ping)
+            if (pings.length > 2) {
+                let jitterSum = 0;
+                for(let i=1; i<pings.length; i++) jitterSum += Math.abs(pings[i] - pings[i-1]);
+                const jitter = (jitterSum / (pings.length - 1)).toFixed(1);
+                document.getElementById('jitter-val').innerText = jitter + " ms";
+            }
+
+            // 4. Run Speed Estimate
+            await runSpeedTest();
+
+            statusEl.innerText = "Diagnostics Sampurno.";
+            setTimeout(() => statusEl.innerText = "Ready", 3000);
+            document.getElementById('diag-btn').classList.remove('opacity-50', 'pointer-events-none');
+        };
+
+        async function monitorCycle() {
+            if (!isMonitoring) return;
+
+            stats.totalChecks++;
+            const now = new Date().toLocaleTimeString();
+            
+            if (chart.data.labels.length > 30) chart.data.labels.shift();
+            chart.data.labels.push(now);
+
+            let anySuccess = false;
+            let cyclePing = 0;
+
+            for (let i = 0; i < targets.length; i++) {
+                const ping = await measurePing(targets[i].url);
+                const dataset = chart.data.datasets[i];
+                
+                if (dataset) {
+                    if (dataset.data.length > 30) dataset.data.shift();
+                    dataset.data.push(ping || 0);
+                }
+
+                if (ping !== null) {
+                    anySuccess = true;
+                    cyclePing = ping;
+                }
+            }
+
+            if (anySuccess) {
+                stats.successChecks++;
+                pings.push(cyclePing);
+                if (pings.length > 20) pings.shift();
+            } else {
+                stats.failedChecks++;
+                stats.disconnects++;
+                addLocalLog("Packet Loss! Connectivity fail hoyeche.", "error");
+            }
+
+            updateStatsUI();
+            chart.update('none');
+            if (stats.totalChecks % 5 === 0) saveSync();
+        }
+
+        function updateStatsUI() {
+            document.getElementById('uptime-val').innerText = stats.totalChecks > 0 ? ((stats.successChecks / stats.totalChecks) * 100).toFixed(1) + '%' : '0%';
+            document.getElementById('disconnect-count').innerText = stats.disconnects;
+        }
+
+        async function saveSync() {
+            if (!user) return;
+            const settingsRef = doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'config');
+            await setDoc(settingsRef, { targets, stats }, { merge: true });
+        }
+
+        window.toggleMonitor = () => {
+            isMonitoring = !isMonitoring;
+            const btn = document.getElementById('btn-pause');
+            btn.innerText = isMonitoring ? 'PAUSE' : 'START';
+            btn.className = isMonitoring ? "px-4 py-2 bg-amber-500 text-white rounded-xl font-bold text-xs" : "px-4 py-2 bg-green-600 text-white rounded-xl font-bold text-xs";
+        };
+
+        window.downloadReport = () => {
+            const csv = `Metric,Value\nISP,${document.getElementById('isp-name').innerText}\nIP,${document.getElementById('ip-address').innerText}\nUptime,${document.getElementById('uptime-val').innerText}\nDisconnects,${document.getElementById('disconnect-count').innerText}\nPacket Loss,${document.getElementById('packet-loss').innerText}\nDNS Speed,${document.getElementById('dns-speed').innerText}`;
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `network_report_${Date.now()}.csv`;
+            a.click();
+        };
+
+        function addLocalLog(msg, type) {
+            const list = document.getElementById('log-list');
+            const div = document.createElement('div');
+            div.className = `p-2 rounded text-[10px] mb-1 border-l-2 ${type === 'error' ? 'bg-red-50 text-red-600 border-red-500' : 'bg-blue-50 text-blue-600 border-blue-500'}`;
+            div.innerHTML = `<strong>[${new Date().toLocaleTimeString()}]</strong> ${msg}`;
+            list.prepend(div);
+            if (list.children.length > 15) list.lastChild.remove();
+        }
+
+        window.addTarget = () => {
+            const name = document.getElementById('target-name').value || 'New Target';
+            const url = document.getElementById('target-url').value;
+            if (!url) return;
+            targets.push({ id: Date.now().toString(), name, url, color: '#'+Math.floor(Math.random()*16777215).toString(16) });
+            renderTargetList();
+            initChartDatasets();
+            saveSync();
+        };
+
+        function renderTargetList() {
+            const list = document.getElementById('target-list');
+            list.innerHTML = targets.map(t => `<div class="text-[10px] bg-slate-50 p-1 rounded mb-1 border border-slate-100 font-bold text-slate-600 truncate">● ${t.name}</div>`).join('');
+        }
+
+        setInterval(monitorCycle, 4000);
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #f1f5f9; }
+        .stat-card { @apply bg-white p-4 rounded-3xl shadow-sm border border-slate-200 flex flex-col; }
+        .custom-scrollbar::-webkit-scrollbar { width: 3px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+
+    <div class="max-w-6xl mx-auto">
+        <!-- Header -->
+        <div class="flex flex-wrap items-center justify-between gap-4 mb-6 bg-white p-6 rounded-[2rem] shadow-sm border border-slate-200">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 bg-blue-600 rounded-2xl flex items-center justify-center text-white font-bold">ISP</div>
+                <div>
+                    <h1 class="text-xl font-bold text-slate-900 leading-none">Network Diagnostic Suite</h1>
+                    <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Advanced Connectivity Analysis</p>
+                </div>
+            </div>
+            <div class="flex gap-2">
+                <button id="diag-btn" onclick="runFullDiagnostics()" class="px-4 py-2 bg-blue-600 text-white rounded-xl font-bold text-xs shadow-lg hover:scale-105 transition-all">RUN DIAGNOSTICS</button>
+                <button id="btn-pause" onclick="toggleMonitor()" class="px-4 py-2 bg-amber-500 text-white rounded-xl font-bold text-xs shadow-md">PAUSE</button>
+                <button onclick="downloadReport()" class="px-4 py-2 bg-slate-900 text-white rounded-xl font-bold text-xs shadow-md">EXPORT</button>
+            </div>
+        </div>
+
+        <!-- Metric Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            <div class="stat-card border-b-4 border-blue-500">
+                <p class="text-[10px] text-slate-400 font-bold uppercase mb-1">Packet Loss</p>
+                <h2 id="packet-loss" class="text-2xl font-bold text-slate-800">Calculating...</h2>
+            </div>
+            <div class="stat-card border-b-4 border-purple-500">
+                <p class="text-[10px] text-slate-400 font-bold uppercase mb-1">DNS Latency</p>
+                <h2 id="dns-speed" class="text-2xl font-bold text-slate-800">Check Required</h2>
+            </div>
+            <div class="stat-card border-b-4 border-green-500">
+                <p class="text-[10px] text-slate-400 font-bold uppercase mb-1">Response Speed</p>
+                <h2 id="est-speed" class="text-2xl font-bold text-slate-800">Check Required</h2>
+            </div>
+            <div class="stat-card border-b-4 border-orange-500">
+                <p class="text-[10px] text-slate-400 font-bold uppercase mb-1">Jitter (Stability)</p>
+                <h2 id="jitter-val" class="text-2xl font-bold text-slate-800">Wait...</h2>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+            <!-- Sidebar -->
+            <div class="lg:col-span-1 space-y-4">
+                <!-- ISP Card -->
+                <div class="bg-slate-900 p-6 rounded-[2rem] text-white shadow-xl">
+                    <p class="text-[10px] font-bold opacity-50 uppercase mb-4 tracking-widest">ISP Details</p>
+                    <div class="space-y-3">
+                        <div>
+                            <p class="text-[9px] opacity-40 uppercase">IP Address</p>
+                            <p id="ip-address" class="text-sm font-mono font-bold">Detecting...</p>
+                        </div>
+                        <div>
+                            <p class="text-[9px] opacity-40 uppercase">Provider</p>
+                            <p id="isp-name" class="text-xs font-bold truncate">Loading...</p>
+                        </div>
+                        <div>
+                            <p class="text-[9px] opacity-40 uppercase">Location</p>
+                            <p id="network-location" class="text-[10px] italic">Detecting...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Stats -->
+                <div class="bg-white p-6 rounded-[2rem] border border-slate-200">
+                    <h3 class="text-[10px] font-bold text-slate-400 uppercase mb-4">Uptime History</h3>
+                    <div class="flex items-end gap-2">
+                        <h2 id="uptime-val" class="text-3xl font-bold text-blue-600">0%</h2>
+                        <span class="text-[9px] text-slate-400 font-bold mb-1 uppercase">Reliability</span>
+                    </div>
+                    <p class="text-[10px] text-slate-400 mt-2">Disconnects: <span id="disconnect-count" class="text-red-500 font-bold">0</span></p>
+                </div>
+
+                <!-- Add Links -->
+                <div class="bg-white p-5 rounded-[2rem] border border-slate-200">
+                    <h3 class="text-[10px] font-bold text-slate-400 uppercase mb-4">Add Test Link</h3>
+                    <div class="space-y-2">
+                        <input id="target-name" type="text" placeholder="Site Name" class="w-full px-3 py-2 text-xs bg-slate-50 border-none rounded-xl outline-none focus:ring-1 focus:ring-blue-500">
+                        <input id="target-url" type="text" placeholder="URL (e.g. google.com)" class="w-full px-3 py-2 text-xs bg-slate-50 border-none rounded-xl outline-none focus:ring-1 focus:ring-blue-500">
+                        <button onclick="addTarget()" class="w-full py-2 bg-blue-50 text-blue-600 text-[10px] font-bold rounded-xl">ADD TARGET</button>
+                    </div>
+                    <div id="target-list" class="mt-4 max-h-32 overflow-y-auto custom-scrollbar"></div>
+                </div>
+            </div>
+
+            <!-- Main Panel -->
+            <div class="lg:col-span-3 space-y-6">
+                <!-- Chart -->
+                <div class="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-200">
+                    <div class="flex items-center justify-between mb-6">
+                        <h3 class="font-bold text-slate-800">Connectivity Graph</h3>
+                        <div class="flex items-center gap-2">
+                            <span id="diag-status" class="text-[9px] font-bold text-blue-500 bg-blue-50 px-3 py-1 rounded-full uppercase tracking-tighter">Ready</span>
+                        </div>
+                    </div>
+                    <div class="h-80">
+                        <canvas id="pingChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Feed -->
+                <div class="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-200">
+                    <h3 class="text-[10px] font-bold text-slate-400 uppercase mb-4 tracking-widest">Network Activity Feed</h3>
+                    <div id="log-list" class="h-32 overflow-y-auto custom-scrollbar text-[10px]">
+                        <p class="text-slate-400 italic text-center py-10 uppercase tracking-widest">No activity recorded yet</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>

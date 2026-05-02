@@ -513,6 +513,10 @@
                 <span class="material-icons-round">water_drop</span>
                 Rain Manage
             </div>
+            <div class="nav-link" onclick="switchTab('water_manage')">
+                <span class="material-icons-round">waves</span>
+                Water Level
+            </div>
             <div class="nav-link" onclick="switchTab('trash')">
                 <span class="material-icons-round">delete_outline</span>
                 Trash Bin
@@ -788,6 +792,52 @@
                 </div>
             </div>
 
+            <!-- ====== WATER LEVEL MANAGE TAB ====== -->
+            <div id="water_manage" class="tab-pane">
+                <div class="card">
+                    <div class="card-header">Water Level Management</div>
+                    <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1.5rem;">
+                        Filter by device and date range to assign a random water level (in feet) within a specific range to all records.
+                    </p>
+                    
+                    <div class="grid grid-2" style="margin-bottom: 1.5rem;">
+                        <div style="grid-column: 1 / -1;">
+                            <label style="font-size:0.8rem; color:var(--text-muted);">Target Device UID (Required)</label>
+                            <select id="waterManageDeviceUid">
+                                <option value="">-- Login to load devices --</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label style="font-size:0.8rem; color:var(--text-muted);">Start Date Filter (Optional)</label>
+                            <input type="datetime-local" id="waterManageStart" style="color:var(--text-muted);">
+                        </div>
+                        <div>
+                            <label style="font-size:0.8rem; color:var(--text-muted);">End Date Filter (Optional)</label>
+                            <input type="datetime-local" id="waterManageEnd" style="color:var(--text-muted);">
+                        </div>
+                    </div>
+                    
+                    <div style="margin-bottom: 1.5rem; padding-top: 1.5rem; border-top: 1px solid var(--border-color);">
+                        <label style="font-size:0.8rem; color:#8b5cf6;">Assign Random Water Level (ft)</label>
+                        <div style="display: flex; gap: 1rem; margin-bottom: 1rem;">
+                            <div style="flex: 1;">
+                                <label style="font-size:0.75rem; color:var(--text-muted);">Min Level (ft)</label>
+                                <input type="number" id="waterManageMinFt" placeholder="e.g. 5" step="0.1" style="margin-bottom: 0;">
+                            </div>
+                            <div style="flex: 1;">
+                                <label style="font-size:0.75rem; color:var(--text-muted);">Max Level (ft)</label>
+                                <input type="number" id="waterManageMaxFt" placeholder="e.g. 10" step="0.1" style="margin-bottom: 0;">
+                            </div>
+                        </div>
+                        <button onclick="randomizeWaterLevel()" style="width: 100%; background: #8b5cf6; color: #fff;"><span class="material-icons-round" style="vertical-align:middle; font-size:1.2rem; margin-right:0.5rem;">waves</span> Update & Randomize</button>
+                        <p style="color: var(--text-muted); font-size: 0.75rem; margin-top: 0.5rem;">This will find all records in the date range above and assign each a random water level between Min and Max.</p>
+                    </div>
+
+                    <div class="response-area" id="waterManageRes" style="display:none;"></div>
+                </div>
+            </div>
+
+
             <!-- ====== TRASH BIN TAB ====== -->
             <div id="trash" class="tab-pane">
                 <div class="card">
@@ -922,6 +972,7 @@
             'transfer': 'Transfer Data',
             'export': 'Export Data',
             'rain_manage': 'Rain Management',
+            'water_manage': 'Water Level Management',
             'trash': 'Trash Bin',
             'tools': 'Developer API Tools'
         };
@@ -1033,6 +1084,8 @@
                 const sourceSelect = document.getElementById('transferSourceUid');
                 const exportSelect = document.getElementById('exportDeviceUid');
                 const rainManageSelect = document.getElementById('rainManageDeviceUid');
+                const waterManageSelect = document.getElementById('waterManageDeviceUid');
+
                 if(sourceSelect) {
                     sourceSelect.innerHTML = '<option value="">-- Select Device --</option>';
                     devices.forEach(dev => {
@@ -1049,6 +1102,12 @@
                     rainManageSelect.innerHTML = '<option value="">-- Select Device --</option>';
                     devices.forEach(dev => {
                         rainManageSelect.innerHTML += `<option value="${dev.uid}">${dev.name || 'Device'} (${dev.uid})</option>`;
+                    });
+                }
+                if(waterManageSelect) {
+                    waterManageSelect.innerHTML = '<option value="">-- Select Device --</option>';
+                    devices.forEach(dev => {
+                        waterManageSelect.innerHTML += `<option value="${dev.uid}">${dev.name || 'Device'} (${dev.uid})</option>`;
                     });
                 }
 
@@ -1631,6 +1690,54 @@
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
         return true;
+        return true;
+    }
+
+    async function randomizeWaterLevel() {
+        const uid = document.getElementById('waterManageDeviceUid').value.trim();
+        const start = document.getElementById('waterManageStart').value;
+        const end = document.getElementById('waterManageEnd').value;
+        const minFt = document.getElementById('waterManageMinFt').value;
+        const maxFt = document.getElementById('waterManageMaxFt').value;
+        const resEl = document.getElementById('waterManageRes');
+
+        if (!uid || minFt === "" || maxFt === "") {
+            resEl.style.display = 'block';
+            setResponse('waterManageRes', 'Error: Device UID, Min Level, and Max Level are required.', true);
+            return;
+        }
+
+        const confirmUpdate = confirm(`Are you sure you want to assign random water levels between ${minFt} and ${maxFt} ft? This cannot be undone.`);
+        if (!confirmUpdate) return;
+
+        try {
+            resEl.style.display = 'block';
+            setResponse('waterManageRes', 'Updating records...');
+
+            const payload = { uid, minFt, maxFt };
+            if (start && end) {
+                payload.start = new Date(start).toISOString();
+                payload.end = new Date(end).toISOString();
+            }
+
+            const res = await fetch(`${getBaseUrl()}/api/public/device/waterlevel/randomize`, {
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${authToken}`
+                },
+                body: JSON.stringify(payload)
+            });
+            const data = await safeFetchParse(res);
+
+            if (res.ok) {
+                setResponse('waterManageRes', data.message, false);
+            } else {
+                setResponse('waterManageRes', data.message || 'Error occurred', true);
+            }
+        } catch (err) {
+            setResponse('waterManageRes', "Network Error: " + err.message, true);
+        }
     }
 
     async function executeFullExport() {
