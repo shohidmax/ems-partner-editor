@@ -592,6 +592,10 @@
                         <button class="btn-sm btn-outline" style="width: auto;" onclick="fetchMyDevices()"><span class="material-icons-round" style="font-size:1rem; vertical-align:middle;">refresh</span> Load Network</button>
                     </div>
                     <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1.5rem;">Clicking on a device will automatically route you to its historical data table.</p>
+                    <div style="margin-bottom: 1.5rem; position: relative;">
+                        <span class="material-icons-round" style="position: absolute; left: 1rem; top: 50%; transform: translateY(-50%); color: var(--text-muted);">search</span>
+                        <input type="text" id="deviceSearchInput" placeholder="Search devices by UID or Name..." onkeyup="filterDevices()" style="margin-bottom: 0; padding-left: 3rem;">
+                    </div>
                     <div id="deviceList">
                         <div style="color: var(--text-muted); text-align: center; padding: 2rem;">Please login or click refresh to load your devices.</div>
                     </div>
@@ -1188,12 +1192,32 @@
                         `;
                     });
                 }
+                
+                // Apply search filter if there's any active text
+                if (document.getElementById('deviceSearchInput')) {
+                    filterDevices();
+                }
             } else {
                  listEl.innerHTML = `<div style="color:var(--danger); padding:1rem;">${devices.message || 'Error fetching'}</div>`;
             }
         } catch(e) {
             listEl.innerHTML = `<div style="color:var(--danger); padding:1rem;">Network Error</div>`;
         }
+    }
+
+    function filterDevices() {
+        const query = document.getElementById('deviceSearchInput').value.toLowerCase();
+        const cards = document.querySelectorAll('#deviceList .device-card');
+        
+        cards.forEach(card => {
+            const name = card.querySelector('h3').innerText.toLowerCase();
+            const uid = card.querySelector('.dc-uid').innerText.toLowerCase();
+            if (name.includes(query) || uid.includes(query)) {
+                card.style.display = 'flex';
+            } else {
+                card.style.display = 'none';
+            }
+        });
     }
 
     function selectDevice(uid) {
