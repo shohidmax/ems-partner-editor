@@ -535,6 +535,167 @@ publicRouter.post('/device/waterlevel/randomize', authenticateJWT, async (req, r
     }
 });
 
+publicRouter.post('/device/sync-historical', authenticateJWT, async (req, res) => {
+    try {
+        const { uid, startDate, endDate } = req.body;
+        if (!uid) {
+            return res.status(400).send({ success: false, message: 'uid is required' });
+        }
+
+        // Open-Meteo Archive is delayed. Safest max date is 2 days ago.
+        const maxAllowedDate = new Date(new Date().getTime() - 2 * 86400000);
+        
+        let end = endDate ? new Date(endDate) : maxAllowedDate;
+        if (end > maxAllowedDate) {
+            end = maxAllowedDate;
+        }
+
+        let start = startDate ? new Date(startDate) : new Date(end.getTime() - 7 * 86400000);
+        if (start > end) {
+            start = new Date(end.getTime() - 86400000); // fallback to 1 day before end
+        }
+
+        // Limit to maximum 2 years (730 days) of data
+        const MAX_DAYS = 730;
+        const diffDays = (end.getTime() - start.getTime()) / 86400000;
+        if (diffDays > MAX_DAYS) {
+            start = new Date(end.getTime() - MAX_DAYS * 86400000);
+        }
+
+        if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+            return res.status(400).send({ success: false, message: 'Invalid start or end date' });
+        }
+
+        // 1. Get device info
+        const device = await req.db.collection('devices').findOne({ uid: String(uid) });
+        if (!device) {
+            return res.status(404).send({ success: false, message: 'Device not found' });
+        }
+
+        if (!device.latitude || !device.longitude) {
+            return res.status(400).send({ success: false, message: 'Device does not have latitude/longitude set' });
+        }
+
+        const lat = device.latitude;
+        const lon = device.longitude;
+        const baseWaterLevel = device.water_level || 0; // fallback to 0 if not set
+
+        // 2. Format dates for Open-Meteo (YYYY-MM-DD)
+        const startStr = start.toISOString().split('T')[0];
+        const endStr = end.toISOString().split('T')[0];
+
+        // 3. Fetch data from Open-Meteo Archive API
+        const apiUrl = `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lon}&start_date=${startStr}&end_date=${endStr}&hourly=temperature_2m,relative_humidity_2m,rain&timezone=auto`;
+        
+        const response = await fetch(apiUrl);
+        if (!response.ok) {
+            const errText = await response.text();
+            console.error('Open-Meteo API Error:', errText);
+            try {
+                const parsed = JSON.parse(errText);
+                return res.status(400).send({ success: false, message: 'Open-Meteo Error: ' + (parsed.reason || 'Failed to fetch data') });
+            } catch(e) {
+                return res.status(500).send({ success: false, message: 'Failed to fetch historical weather data' });
+            }
+        }
+
+        const data = await response.json();
+        
+        if (!data.hourly || !data.hourly.time) {
+            return res.status(500).send({ success: false, message: 'Invalid response from weather API' });
+        }
+
+        // 4. Delete existing data for this uid and date range to avoid duplicates
+        await req.db.collection('espdata2').deleteMany({
+            uid: String(uid),
+            receivedAt: { $gte: start, $lte: new Date(end.getTime() + 86400000) } // include the whole end day
+        });
+
+        // 5. Generate telemetry data
+        const recordsToInsert = [];
+        const times = data.hourly.time;
+        const temps = data.hourly.temperature_2m;
+        const hums = data.hourly.relative_humidity_2m;
+        const rains = data.hourly.rain;
+        
+        // 1 hour = 4 records of 15 min.
+        const totalExpectedRecords = times.length * 4;
+
+        for (let i = 0; i < times.length; i++) {
+            const timeStr = times[i];
+            const baseDateObj = new Date(timeStr);
+            
+            const temp = temps[i] !== null ? temps[i] : 25.0; // fallback
+            const hum = hums[i] !== null ? hums[i] : 60.0;
+            const rain = rains[i] !== null ? rains[i] : 0.0;
+
+            for (let m = 0; m < 4; m++) {
+                const dateObj = new Date(baseDateObj.getTime() + m * 15 * 60000);
+
+                // Generate randomized water level based on base level
+                const fluctuation = (Math.random() * 1) - 0.5; // -0.5 to +0.5
+                let calcWaterLevel = baseWaterLevel + fluctuation;
+                if (rain > 0) {
+                    calcWaterLevel += (rain * 0.1); // slight increase based on rain
+                }
+                calcWaterLevel = Math.round(calcWaterLevel * 100) / 100;
+                if (calcWaterLevel < 0) calcWaterLevel = 0;
+
+                const doc = {
+                    uid: String(uid),
+                    receivedAt: dateObj,
+                    timestamp: dateObj.toISOString(),
+                    dateTime: dateObj.toISOString(),
+                    version: "1.0",
+                    environment: { temp: temp, hum: hum },
+                    rain: { mm: rain },
+                    pssensor: { depth_ft: calcWaterLevel },
+                    temperature: temp,
+                    humidity: hum,
+                    rainfall: rain,
+                    water_level: calcWaterLevel
+                };
+                
+                recordsToInsert.push(doc);
+            }
+        }
+
+        // 6. Insert data in batches and emit progress
+        const batchSize = 96; // 1 day worth of 15-min data
+        let insertedCount = 0;
+
+        if (recordsToInsert.length > 0) {
+            for (let i = 0; i < recordsToInsert.length; i += batchSize) {
+                const batch = recordsToInsert.slice(i, i + batchSize);
+                await req.db.collection('espdata2').insertMany(batch, { ordered: false });
+                insertedCount += batch.length;
+                
+                const percent = Math.round((insertedCount / totalExpectedRecords) * 100);
+                // Emit progress via Socket.io
+                io.emit('sync_progress', { 
+                    uid: String(uid), 
+                    percent: percent, 
+                    current: insertedCount, 
+                    total: totalExpectedRecords 
+                });
+                
+                // Small delay to allow the event loop to process other requests and UI to update
+                await new Promise(r => setTimeout(r, 50));
+            }
+        }
+
+        res.send({ 
+            success: true, 
+            message: `Successfully synchronized and generated ${recordsToInsert.length} historical records.`,
+            count: recordsToInsert.length
+        });
+
+    } catch (error) {
+        console.error('Error in /device/sync-historical:', error);
+        res.status(500).send({ success: false, message: 'Server error during historical sync' });
+    }
+});
+
 
 // ৩. অথেন্টিকেশন রাউটস
 const authRouter = express.Router();
@@ -967,7 +1128,7 @@ adminRouter.get('/devices', async (req, res) => {
 adminRouter.put('/device/:uid', async (req, res) => {
     try {
         const { uid } = req.params;
-        const { location, name, latitude, longitude, institution } = req.body;
+        const { location, name, latitude, longitude, institution, water_level } = req.body;
         
         const updateFields = {};
         if (location !== undefined) updateFields.location = location;
@@ -975,6 +1136,7 @@ adminRouter.put('/device/:uid', async (req, res) => {
         if (latitude !== undefined) updateFields.latitude = latitude;
         if (longitude !== undefined) updateFields.longitude = longitude;
         if (institution !== undefined) updateFields.institution = institution;
+        if (water_level !== undefined) updateFields.water_level = parseFloat(water_level);
 
         if (Object.keys(updateFields).length === 0) {
             return res.status(400).send({ success: false, message: 'No fields to update.' });
@@ -1125,6 +1287,76 @@ adminRouter.post('/device/clone', async (req, res) => {
 });
 
 
+
+adminRouter.post('/device/generate-history', async (req, res) => {
+    try {
+        const { uid, months = 18, intervalMins = 15 } = req.body;
+        
+        if (!uid) {
+            return res.status(400).send({ success: false, message: 'Device UID is required' });
+        }
+
+        const device = await req.db.collection('devices').findOne({ uid: String(uid) });
+        if (!device) {
+            return res.status(404).send({ success: false, message: 'Device not found' });
+        }
+
+        const endDate = new Date();
+        const startDate = new Date();
+        startDate.setMonth(startDate.getMonth() - parseInt(months));
+        
+        let currentDate = new Date(startDate);
+        const recordsToInsert = [];
+        const intervalMs = parseInt(intervalMins) * 60 * 1000;
+
+        while (currentDate <= endDate) {
+            // Randomly fluctuate water level between 2 and 5 (or slightly around base)
+            const randomWaterLevel = Math.round((Math.random() * (5 - 2) + 2) * 100) / 100;
+            const randomTemp = 20 + Math.random() * 15;
+            const randomHum = 50 + Math.random() * 40;
+            const randomRain = Math.random() > 0.9 ? Math.random() * 5 : 0;
+
+            recordsToInsert.push({
+                uid: String(uid),
+                timestamp: currentDate.toISOString(),
+                dateTime: currentDate.toISOString(),
+                receivedAt: new Date(currentDate),
+                environment: {
+                    temp: Math.round(randomTemp * 10) / 10,
+                    hum: Math.round(randomHum * 10) / 10
+                },
+                pssensor: {
+                    depth_ft: randomWaterLevel
+                },
+                rain: {
+                    mm: Math.round(randomRain * 100) / 100
+                },
+                temperature: Math.round(randomTemp * 10) / 10,
+                humidity: Math.round(randomHum * 10) / 10,
+                water_level: randomWaterLevel,
+                rainfall: Math.round(randomRain * 100) / 100,
+                weather_code: 0,
+                wind_speed: Math.round(Math.random() * 20 * 10) / 10,
+                apparent_temperature: Math.round((randomTemp + 2) * 10) / 10
+            });
+
+            currentDate = new Date(currentDate.getTime() + intervalMs);
+        }
+
+        if (recordsToInsert.length > 0) {
+            const batchSize = 5000;
+            for (let i = 0; i < recordsToInsert.length; i += batchSize) {
+                const batch = recordsToInsert.slice(i, i + batchSize);
+                await req.db.collection('espdata2').insertMany(batch, { ordered: false });
+            }
+        }
+
+        res.send({ success: true, message: `Successfully generated ${recordsToInsert.length} historical records for device ${uid}.` });
+    } catch (error) {
+        console.error('Error generating historical data:', error);
+        res.status(500).send({ success: false, message: 'Internal server error during history generation' });
+    }
+});
 
 adminRouter.get('/users', async (req, res) => {
     const users = await req.db.collection('users').find({}, { projection: { passwordHash: 0 } }).toArray();
@@ -1326,6 +1558,64 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+// --- Open-Meteo 15 Minute Auto-Fetch ---
+async function fetchOpenMeteoForAllDevices() {
+    if (!db) return;
+    try {
+        const devicesCollection = db.collection('devices');
+        const devices = await devicesCollection.find({
+            latitude: { $exists: true, $ne: null, $ne: "" },
+            longitude: { $exists: true, $ne: null, $ne: "" }
+        }).toArray();
+
+        for (const device of devices) {
+            const url = `https://weatherapi.espserver.site/v1/forecast?latitude=${device.latitude}&longitude=${device.longitude}&current=temperature_2m,relative_humidity_2m,apparent_temperature,rain,precipitation,weather_code,wind_speed_10m&timezone=auto&models=best_match`;
+            try {
+                const response = await fetch(url);
+                if (!response.ok) {
+                    console.error(`[Open-Meteo API Error] Device ${device.uid}: ${response.statusText}`);
+                    continue;
+                }
+                const data = await response.json();
+                
+                if (data && data.current) {
+                    const current = data.current;
+                    const rainValue = current.rain !== undefined && current.rain !== null ? current.rain : (current.precipitation || 0);
+                    
+                    const newData = {
+                        uid: device.uid,
+                        timestamp: new Date().toISOString(),
+                        receivedAt: new Date(),
+                        environment: {
+                            temp: current.temperature_2m,
+                            hum: current.relative_humidity_2m
+                        },
+                        pssensor: {
+                            depth_ft: device.water_level || 0
+                        },
+                        rain: {
+                            mm: rainValue
+                        },
+                        weather_code: current.weather_code,
+                        wind_speed: current.wind_speed_10m,
+                        temperature: current.temperature_2m,
+                        humidity: current.relative_humidity_2m,
+                        water_level: device.water_level || 0,
+                        rainfall: rainValue,
+                        apparent_temperature: current.apparent_temperature
+                    };
+
+                    espDataBuffer.push(newData);
+                }
+            } catch (err) {
+                console.error(`[Open-Meteo Fetch Error] Device: ${device.uid}`, err.message);
+            }
+        }
+    } catch (err) {
+        console.error('[Open-Meteo Global Fetch Error]', err.message);
+    }
+}
+
 // --- সার্ভার স্টার্টআপ ফাংশন ---
 async function startServer() {
     try {
@@ -1346,6 +1636,8 @@ async function startServer() {
         setInterval(processDataBuffer, BATCH_INTERVAL_MS);
         setInterval(checkOfflineDevices, OFFLINE_CHECK_INTERVAL_MS);
         setInterval(cleanupBackups, 3600000); // ১ ঘণ্টা পর পর
+        setInterval(fetchOpenMeteoForAllDevices, 15 * 60 * 1000); // ১৫ মিনিট পর পর
+        setTimeout(fetchOpenMeteoForAllDevices, 15000); // সার্ভার চালুর ১৫ সেকেন্ড পর একবার রান করবে
 
         // সার্ভার লিসেন
         http_server.listen(PORT, () => {

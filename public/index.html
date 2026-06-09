@@ -7,6 +7,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
     <style>
         :root {
             --bg-color: #0f172a;
@@ -207,6 +208,11 @@
         }
         .response-area.error { color: var(--danger); }
 
+        @keyframes loadingBar {
+            0% { left: -50%; }
+            100% { left: 100%; }
+        }
+
         /* --- STATS & BADGES --- */
         .stat-card {
             background: linear-gradient(135deg, rgba(30, 41, 59, 0.9), rgba(15, 23, 42, 0.9));
@@ -238,7 +244,7 @@
             background: rgba(30, 41, 59, 0.7);
             border: 1px solid rgba(255, 255, 255, 0.05);
             border-radius: 1.25rem;
-            padding: 1.75rem;
+            padding: 1.25rem;
             transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
             cursor: pointer;
             display: flex;
@@ -379,6 +385,8 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
+            flex-wrap: wrap;
+            gap: 0.75rem;
             margin-top: auto;
             padding-top: 1rem;
             border-top: 1px solid rgba(255, 255, 255, 0.05);
@@ -393,11 +401,11 @@
         }
         .dc-last-seen .material-icons-round { font-size: 0.95rem; }
 
-        .dc-actions { display: flex; gap: 0.5rem; }
+        .dc-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.25rem; }
 
         .btn-icon {
-            width: 32px;
-            height: 32px;
+            width: 28px;
+            height: 28px;
             border-radius: 0.5rem;
             display: flex;
             align-items: center;
@@ -411,7 +419,7 @@
         .btn-icon:hover { color: white; }
         .btn-icon.transfer-btn:hover { background: rgba(59, 130, 246, 0.2); border-color: rgba(59, 130, 246, 0.5); color: var(--primary); }
         .btn-icon.delete-btn:hover { background: rgba(239, 68, 68, 0.2); border-color: rgba(239, 68, 68, 0.5); color: var(--danger); }
-        .btn-icon .material-icons-round { font-size: 1.1rem; }
+        .btn-icon .material-icons-round { font-size: 1rem; }
 
         .table-responsive {
             width: 100%;
@@ -462,7 +470,7 @@
             position: absolute; top: 1rem; right: 1rem;
             cursor: pointer; color: var(--text-muted);
         }
-        .modal-close:hover { color: white; }
+        .modal-close:hover { color: var(--danger); }
 
         /* Utilities */
         .tab-pane { display: none; animation: fadeIn 0.3s ease; }
@@ -524,6 +532,22 @@
             <div class="nav-link" onclick="switchTab('tools')">
                 <span class="material-icons-round">build</span>
                 Developer Tools
+            </div>
+            <div class="nav-link" onclick="switchTab('weather_data')">
+                <span class="material-icons-round">cloud</span>
+                Open Meteo
+            </div>
+            <div class="nav-link" onclick="switchTab('weather_archive')">
+                <span class="material-icons-round">history</span>
+                15-Min Archive
+            </div>
+            <div class="nav-link" onclick="switchTab('api_docs')">
+                <span class="material-icons-round">menu_book</span>
+                API Docs
+            </div>
+            <div class="nav-link" onclick="switchTab('data_updater')">
+                <span class="material-icons-round">edit</span>
+                Data Updater
             </div>
         </div>
         
@@ -856,6 +880,306 @@
                 </div>
             </div>
 
+            <!-- ====== OPEN METEO TAB ====== -->
+            <div id="weather_data" class="tab-pane">
+                <div class="card">
+                    <div class="card-header">Open Meteo Data Explorer</div>
+                    <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1.5rem;">
+                        Filter and view weather data from Open Meteo.
+                    </p>
+                    
+                    <div class="grid grid-2" style="margin-bottom: 1.5rem;">
+                        <div>
+                            <label style="font-size:0.8rem; color:var(--text-muted);">Latitude (e.g. 23.81)</label>
+                            <input type="text" id="weatherLat" placeholder="Latitude">
+                        </div>
+                        <div>
+                            <label style="font-size:0.8rem; color:var(--text-muted);">Longitude (e.g. 90.41)</label>
+                            <input type="text" id="weatherLon" placeholder="Longitude">
+                        </div>
+                        <div>
+                            <label style="font-size:0.8rem; color:var(--text-muted);">Start Date</label>
+                            <input type="date" id="weatherStart" style="color:var(--text-muted);">
+                        </div>
+                        <div>
+                            <label style="font-size:0.8rem; color:var(--text-muted);">End Date</label>
+                            <input type="date" id="weatherEnd" style="color:var(--text-muted);">
+                        </div>
+                    </div>
+                    
+                    <button onclick="fetchWeatherData()" style="background: var(--primary);"><span class="material-icons-round" style="vertical-align:middle; font-size:1.2rem; margin-right:0.5rem;">search</span> Fetch Weather Data</button>
+                    
+                    <div class="d-flex gap-3" style="margin-top: 1rem;">
+                        <button class="btn-outline" onclick="showSpecificWeather('current')" style="color: var(--success); border-color: var(--success);">Show Current Weather</button>
+                        <button class="btn-outline" onclick="showSpecificWeather('15min')" style="color: var(--warning); border-color: var(--warning);">Show 15 Mins Ago</button>
+                    </div>
+                    
+                    <div class="response-area" id="weatherRes" style="display:none; max-height: 400px;"></div>
+                </div>
+            </div>
+
+            <!-- ====== 15 MIN WEATHER ARCHIVE TAB ====== -->
+            <div id="weather_archive" class="tab-pane">
+                <div class="card">
+                    <div class="card-header">15-Min Weather Archive</div>
+                    <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1.5rem;">
+                        View detailed 15-minute interval historical data for Temp, Humidity, Feels Like, and Rain.
+                    </p>
+                    
+                    <div class="grid grid-2" style="margin-bottom: 1.5rem;">
+                        <div>
+                            <label style="font-size:0.8rem; color:var(--text-muted);">Latitude (e.g. 24.37)</label>
+                            <input type="text" id="archiveLat" placeholder="Latitude">
+                        </div>
+                        <div>
+                            <label style="font-size:0.8rem; color:var(--text-muted);">Longitude (e.g. 88.60)</label>
+                            <input type="text" id="archiveLon" placeholder="Longitude">
+                        </div>
+                        <div>
+                            <label style="font-size:0.8rem; color:var(--text-muted);">Start Date</label>
+                            <input type="date" id="archiveStart" style="color:var(--text-muted);">
+                        </div>
+                        <div>
+                            <label style="font-size:0.8rem; color:var(--text-muted);">End Date</label>
+                            <input type="date" id="archiveEnd" style="color:var(--text-muted);">
+                        </div>
+                    </div>
+                    
+                    <button onclick="fetchArchiveData()" style="background: var(--info);"><span class="material-icons-round" style="vertical-align:middle; font-size:1.2rem; margin-right:0.5rem;">history</span> Fetch 15-Min Archive Data</button>
+                    
+                    <div class="response-area" id="archiveRes" style="display:none; text-align:center; padding: 1rem;"></div>
+                    
+                    <div class="table-responsive" style="margin-top: 1.5rem; display: none; max-height: 600px;" id="archiveTableContainer">
+                        <table class="data-table" id="archiveTable">
+                            <thead>
+                                <tr>
+                                    <th>Date & Time</th>
+                                    <th>Temp (°C)</th>
+                                    <th>Feels Like (°C)</th>
+                                    <th>Humidity (%)</th>
+                                    <th>Rain (mm)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="archiveTableBody">
+                                <!-- Data rows injected here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ====== API DOCS TAB ====== -->
+            <div id="api_docs" class="tab-pane">
+                <div class="card" style="line-height: 1.6;">
+                    <div class="card-header" style="color: var(--primary);">Open-Meteo API Cheat-Sheet</div>
+                    <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.5rem;">
+                        আপনার নিজস্ব Open-Meteo সার্ভারের (<code>weatherapi.espserver.site</code>) জন্য সম্পূর্ণ এবং কাস্টমাইজড API ডকুমেন্টেশন। যেহেতু আপনার সার্ভারে এখন লাইভ এবং হিস্টোরিক্যাল— দুই ধরনের ডেটাবেসই রেডি আছে, তাই আপনার ড্যাশবোর্ড বা যেকোনো প্রজেক্টে ডেটা কল করার জন্য এই ডকুমেন্টেশনটি একটি চিট-শিট হিসেবে কাজ করবে।
+                    </p>
+
+                    <h3 style="margin-top: 1.5rem; margin-bottom: 0.5rem; color: var(--text-main);">🌐 Base URL (মূল লিংক)</h3>
+                    <div style="background: rgba(0,0,0,0.3); padding: 1rem; border-radius: 0.5rem; font-family: monospace; color: var(--success); margin-bottom: 1rem;">
+                        GET https://weatherapi.espserver.site/v1/forecast
+                    </div>
+                    <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1.5rem;"><strong>রেসপন্স ফরম্যাট:</strong> JSON</p>
+
+                    <h3 style="margin-top: 1.5rem; margin-bottom: 0.5rem; color: var(--info);">১. লাইভ এবং ফোরকাস্ট ডেটা API (Live Dashboard-এর জন্য)</h3>
+                    <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.5rem;">আপনার ড্যাশবোর্ডের বর্তমান অবস্থা এবং টাইমলাইনের জন্য এই API টি ব্যবহার করবেন। এটি <code>dwd_icon</code> মডেল ব্যবহার করে।</p>
+                    <ul style="font-size: 0.85rem; color: var(--text-muted); margin-left: 1.5rem; margin-bottom: 1rem;">
+                        <li><code>latitude</code> & <code>longitude</code>: লোকেশনের কোঅর্ডিনেট (যেমন: 24.3745, 88.6042)</li>
+                        <li><code>current</code>: রিয়েল-টাইম ডেটার তালিকা।</li>
+                        <li><code>minutely_15</code>: প্রতি ১৫ মিনিটের টাইমলাইন ডেটা।</li>
+                        <li><code>timezone</code>: <code>auto</code> (সার্ভার নিজে থেকে লোকাল টাইম জোন সেট করে নেবে)।</li>
+                        <li><code>models</code>: <code>dwd_icon</code></li>
+                    </ul>
+                    <div style="background: rgba(0,0,0,0.3); padding: 1rem; border-radius: 0.5rem; font-family: monospace; font-size: 0.8rem; color: var(--warning); word-wrap: break-word; margin-bottom: 1.5rem;">
+                        https://weatherapi.espserver.site/v1/forecast?latitude=24.3745&longitude=88.6042&current=temperature_2m,apparent_temperature,relative_humidity_2m,rain,weather_code,wind_speed_10m,shortwave_radiation&minutely_15=temperature_2m,relative_humidity_2m,rain&timezone=auto&models=dwd_icon
+                    </div>
+
+                    <h3 style="margin-top: 1.5rem; margin-bottom: 0.5rem; color: var(--warning);">২. হিস্টোরিক্যাল ডেটা API (গ্রাফ ও ট্রেন্ড অ্যানালাইসিসের জন্য)</h3>
+                    <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.5rem;">২০২৪ থেকে শুরু করে আজকের দিন পর্যন্ত পেছনের যেকোনো দিনের ডেটা বের করার জন্য এটি ব্যবহার করবেন। এটি আপনার ডাউনলোড করা বিশাল <code>copernicus_era5</code> মডেল ব্যবহার করে।</p>
+                    <ul style="font-size: 0.85rem; color: var(--text-muted); margin-left: 1.5rem; margin-bottom: 1rem;">
+                        <li><code>start_date</code>: শুরুর তারিখ (YYYY-MM-DD ফরম্যাটে)।</li>
+                        <li><code>end_date</code>: শেষের তারিখ (YYYY-MM-DD ফরম্যাটে)।</li>
+                        <li><code>hourly</code>: প্রতি ঘণ্টার ডেটার তালিকা।</li>
+                        <li><code>models</code>: <code>copernicus_era5</code></li>
+                    </ul>
+                    <div style="background: rgba(0,0,0,0.3); padding: 1rem; border-radius: 0.5rem; font-family: monospace; font-size: 0.8rem; color: var(--warning); word-wrap: break-word; margin-bottom: 0.5rem;">
+                        https://weatherapi.espserver.site/v1/forecast?latitude=24.3745&longitude=88.6042&hourly=temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,weather_code,wind_speed_10m,shortwave_radiation&start_date=2024-01-01&end_date=2026-06-06&timezone=auto&models=copernicus_era5
+                    </div>
+                    <p style="font-size: 0.8rem; color: var(--danger); font-style: italic; margin-bottom: 1.5rem;">(⚠️ নোট: হিস্টোরিক্যাল মডেলে বৃষ্টির জন্য <code>rain</code> এর বদলে <code>precipitation</code> ব্যবহার করতে হবে)।</p>
+
+                    <h3 style="margin-top: 1.5rem; margin-bottom: 0.5rem; color: var(--success);">📊 ডেটা ডিকশনারি (Variables Explanation)</h3>
+                    <div class="table-responsive" style="margin-bottom: 1.5rem;">
+                        <table class="data-table">
+                            <thead>
+                                <tr><th>Parameter</th><th>Description</th><th>Unit</th></tr>
+                            </thead>
+                            <tbody>
+                                <tr><td><code>temperature_2m</code></td><td>ভূপৃষ্ঠ থেকে ২ মিটার ওপরে বাতাসের তাপমাত্রা</td><td>°C</td></tr>
+                                <tr><td><code>apparent_temperature</code></td><td>রোদ, আর্দ্রতা ও বাতাস মিলিয়ে অনুভূত তাপমাত্রা (Feels Like)</td><td>°C</td></tr>
+                                <tr><td><code>relative_humidity_2m</code></td><td>বাতাসে জলীয় বাষ্পের পরিমাণ বা আর্দ্রতা</td><td>%</td></tr>
+                                <tr><td><code>rain</code></td><td>বৃষ্টির পরিমাণ (শুধুমাত্র লাইভ/ফোরকাস্ট মডেলের জন্য)</td><td>mm</td></tr>
+                                <tr><td><code>precipitation</code></td><td>মোট বৃষ্টিপাত (শুধুমাত্র হিস্টোরিক্যাল ERA5 মডেলের জন্য)</td><td>mm</td></tr>
+                                <tr><td><code>wind_speed_10m</code></td><td>ভূপৃষ্ঠ থেকে ১০ মিটার ওপরে বাতাসের গতিবেগ</td><td>km/h</td></tr>
+                                <tr><td><code>shortwave_radiation</code></td><td>সৌর বিকিরণ বা রোদের তীব্রতা</td><td>W/m²</td></tr>
+                                <tr><td><code>dew_point_2m</code></td><td>শিশিরাঙ্ক</td><td>°C</td></tr>
+                                <tr><td><code>weather_code</code></td><td>আবহাওয়ার ধরন বোঝানোর জন্য WMO কোড</td><td>Code (0-99)</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <h3 style="margin-top: 1.5rem; margin-bottom: 0.5rem; color: var(--danger);">⚡ WMO Weather Codes (আপনার অ্যালার্ট সিস্টেমের জন্য)</h3>
+                    <ul style="font-size: 0.85rem; color: var(--text-muted); margin-left: 1.5rem; margin-bottom: 1rem; list-style-type: square;">
+                        <li><strong>0 - 3:</strong> আকাশ পরিষ্কার বা সামান্য মেঘলা (Clear / Partly Cloudy)</li>
+                        <li><strong>45, 48:</strong> কুয়াশা (Fog)</li>
+                        <li><strong>51, 53, 55:</strong> গুঁড়ি গুঁড়ি বৃষ্টি (Drizzle)</li>
+                        <li><strong>61, 63, 65:</strong> মাঝারি থেকে ভারী বৃষ্টি (Rain)</li>
+                        <li><strong>80, 81, 82:</strong> মুষলধারে বৃষ্টি / বৃষ্টিপাত (Rain Showers)</li>
+                        <li><strong style="color: var(--danger);">95:</strong> বজ্রঝড় / বিজলি চমকানো (Thunderstorm) ⚠️ <em style="color: var(--danger);">আপনার ড্যাশবোর্ডের রেড অ্যালার্ট</em></li>
+                        <li><strong style="color: var(--danger);">96, 99:</strong> শিলাবৃষ্টিসহ ভয়াবহ বজ্রঝড় (Thunderstorm with hail) ⚠️ <em style="color: var(--danger);">আপনার ড্যাশবোর্ডের রেড অ্যালার্ট</em></li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- ====== DATA UPDATER TAB ====== -->
+            <div id="data_updater" class="tab-pane">
+                <div class="card">
+                    <div class="card-header">Update Device Information</div>
+                    <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1.5rem;">
+                        View and update full metadata for a specific device. Select a device from the "My Devices" tab to load its data here.
+                    </p>
+                    
+                    <div class="grid grid-2" style="margin-bottom: 1.5rem;">
+                        <div>
+                            <label style="font-size:0.8rem; color:var(--text-muted);">Device UID (Read Only)</label>
+                            <input type="text" id="updaterUid" readonly style="opacity: 0.7; cursor: not-allowed;">
+                        </div>
+                        <div>
+                            <label style="font-size:0.8rem; color:var(--text-muted);">Device Name</label>
+                            <input type="text" id="updaterName" placeholder="e.g. Device-TEST">
+                        </div>
+                        <div>
+                            <label style="font-size:0.8rem; color:var(--text-muted);">Location</label>
+                            <input type="text" id="updaterLocation" placeholder="e.g. Dhaka">
+                        </div>
+                        <div>
+                            <label style="font-size:0.8rem; color:var(--text-muted);">Institution</label>
+                            <input type="text" id="updaterInstitution" placeholder="e.g. BUET">
+                        </div>
+                        <div>
+                            <label style="font-size:0.8rem; color:var(--text-muted);">Latitude</label>
+                            <input type="number" step="any" id="updaterLat" placeholder="e.g. 23.81">
+                        </div>
+                        <div>
+                            <label style="font-size:0.8rem; color:var(--text-muted);">Longitude</label>
+                            <input type="number" step="any" id="updaterLon" placeholder="e.g. 90.41">
+                        </div>
+                        <div>
+                            <label style="font-size:0.8rem; color:var(--text-muted);">Water Level</label>
+                            <input type="number" step="any" id="updaterWaterLevel" placeholder="e.g. 5.2">
+                        </div>
+                        <div>
+                            <label style="font-size:0.8rem; color:var(--text-muted);">Status (Read Only)</label>
+                            <input type="text" id="updaterStatus" readonly style="opacity: 0.7; cursor: not-allowed;">
+                        </div>
+                        <div>
+                            <label style="font-size:0.8rem; color:var(--text-muted);">Last Seen (Read Only)</label>
+                            <input type="text" id="updaterLastSeen" readonly style="opacity: 0.7; cursor: not-allowed;">
+                        </div>
+                    </div>
+                    
+                    <button onclick="submitDataUpdate()" style="background: var(--warning); color: #000;"><span class="material-icons-round" style="vertical-align:middle; font-size:1.2rem; margin-right:0.5rem;">save</span> Save Changes</button>
+                    
+                    <div class="response-area" id="updaterRes" style="display:none; margin-top: 1rem;"></div>
+
+                    <hr style="margin: 2rem 0; border-color: var(--border-color);">
+                    <div class="card-header d-flex justify-between" style="color: #3b82f6; align-items: center;">
+                        <span>Data Updater Dashboard (Open-Meteo)</span>
+                        <div id="updaterLocationHeader" style="font-size: 0.85rem; color: var(--text-muted); font-weight: normal; background: rgba(255,255,255,0.05); padding: 0.3rem 0.8rem; border-radius: 1rem; display: flex; align-items: center; gap: 0.3rem;">
+                            <span class="material-icons-round" style="font-size:1.1rem; color: var(--warning);">location_on</span>
+                            <span id="updaterLocationText">Location Unknown</span>
+                        </div>
+                    </div>
+                    <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1.5rem;">
+                        Automatically fetches historical weather data for this device's location. Adjust parameters below to filter data.
+                    </p>
+                    
+                    <div style="display: flex; gap: 1rem; margin-bottom: 1.5rem;">
+                        <button onclick="setUpdaterDatesAndFetch('2025-01-01', '2026-06-03')" class="btn-outline btn-sm" style="flex: 1;"><span class="material-icons-round" style="vertical-align:middle; font-size:1rem;">history</span> Previous Data (Jan '25 - Jun '26)</button>
+                        <button onclick="setUpdaterDatesAndFetch('2026-06-03', new Date().toISOString().split('T')[0])" class="btn-outline btn-sm" style="flex: 1;"><span class="material-icons-round" style="vertical-align:middle; font-size:1rem;">update</span> New Data (Jun '26 - Today)</button>
+                    </div>
+
+                    <div class="grid grid-4" style="margin-bottom: 1.5rem;">
+                        <div>
+                            <label style="font-size:0.8rem; color:var(--text-muted);">Model</label>
+                            <select id="updaterWeatherModel" style="width: 100%;">
+                                <option value="icon_seamless">DWD Icon (Live/Forecast)</option>
+                                <option value="copernicus_era5" selected>ERA5 (Historical)</option>
+                                <option value="best_match">Best Match (Auto)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label style="font-size:0.8rem; color:var(--text-muted);">Start Date</label>
+                            <input type="date" id="updaterWeatherStart" style="color:var(--text-muted);">
+                        </div>
+                        <div>
+                            <label style="font-size:0.8rem; color:var(--text-muted);">End Date</label>
+                            <input type="date" id="updaterWeatherEnd" style="color:var(--text-muted);">
+                        </div>
+                        <div>
+                            <label style="font-size:0.8rem; color:var(--text-muted);">Data Interval</label>
+                            <select id="updaterWeatherInterval" style="width: 100%;">
+                                <option value="daily">Daily</option>
+                                <option value="60">Hourly</option>
+                                <option value="45">45 Minutes</option>
+                                <option value="30">30 Minutes</option>
+                                <option value="15">15 Minutes</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div style="margin-bottom: 1.5rem; background: rgba(0,0,0,0.2); padding: 1rem; border-radius: 0.5rem; border: 1px solid var(--border-color);">
+                        <label style="font-size:0.8rem; color:#8b5cf6; display:block; margin-bottom:0.75rem; font-weight:600;">Select Variables to Display (Filter)</label>
+                        <div style="display: flex; gap: 1.5rem; flex-wrap: wrap; font-size: 0.85rem; color: var(--text-muted);">
+                            <label style="display:flex; align-items:center; gap:0.25rem;"><input type="checkbox" id="chkTemp" checked> Temp</label>
+                            <label style="display:flex; align-items:center; gap:0.25rem;"><input type="checkbox" id="chkAppTemp" checked> Feels Like</label>
+                            <label style="display:flex; align-items:center; gap:0.25rem;"><input type="checkbox" id="chkHum" checked> Humidity</label>
+                            <label style="display:flex; align-items:center; gap:0.25rem;"><input type="checkbox" id="chkPrecip" checked> Precip (Rain)</label>
+                            <label style="display:flex; align-items:center; gap:0.25rem;"><input type="checkbox" id="chkWind" checked> Wind Speed</label>
+                            <label style="display:flex; align-items:center; gap:0.25rem;"><input type="checkbox" id="chkCode" checked> Weather Code</label>
+                        </div>
+                    </div>
+                    <button onclick="fetchUpdaterWeather()" style="background: #3b82f6;"><span class="material-icons-round" style="vertical-align:middle; font-size:1.2rem; margin-right:0.5rem;">history</span> Fetch Weather Data</button>
+                    
+                    <div id="updaterDashboardContainer" style="display: none; margin-top: 2rem;">
+                        <!-- KPI Cards -->
+                        <div class="grid grid-4" id="updaterKpiCards" style="margin-bottom: 2rem;">
+                            <!-- Dynamically populated -->
+                        </div>
+                        
+                        <!-- Chart Area -->
+                        <div style="background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 0.75rem; padding: 1rem; margin-bottom: 2rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
+                            <canvas id="updaterWeatherChart" style="width: 100%; height: 300px;"></canvas>
+                        </div>
+                        
+                        <!-- Table Controls -->
+                        <div class="d-flex justify-between" style="margin-bottom: 1rem; align-items: center;">
+                            <h3 style="font-size: 1.1rem; color: var(--text-main); display: flex; align-items: center; gap: 0.5rem;">
+                                Data Records 
+                                <span id="updaterTableCount" style="font-size: 0.8rem; background: rgba(59,130,246,0.2); color: #3b82f6; padding: 0.2rem 0.6rem; border-radius: 1rem; display: none;">0 rows</span>
+                            </h3>
+                            <div style="position: relative; width: 250px;">
+                                <span class="material-icons-round" style="position: absolute; left: 0.5rem; top: 50%; transform: translateY(-50%); color: var(--text-muted); font-size: 1.2rem;">search</span>
+                                <input type="text" id="updaterTableSearch" placeholder="Filter records..." style="width: 100%; padding-left: 2rem; margin: 0; height: 36px; border-radius: 2rem;" onkeyup="filterUpdaterTable()">
+                            </div>
+                        </div>
+                        
+                        <!-- Table Container -->
+                        <div id="updaterWeatherRes" style="padding: 0; background: transparent;"></div>
+                    </div>
+                </div>
+            </div>
+
             <!-- ====== DEVELOPER TOOLS TAB ====== -->
             <div id="tools" class="tab-pane">
                 <div class="grid">
@@ -978,7 +1302,11 @@
             'rain_manage': 'Rain Management',
             'water_manage': 'Water Level Management',
             'trash': 'Trash Bin',
-            'tools': 'Developer API Tools'
+            'tools': 'Developer API Tools',
+            'weather_data': 'Open Meteo Data',
+            'weather_archive': '15-Min Weather Archive',
+            'api_docs': 'API Documentation',
+            'data_updater': 'Data Updater'
         };
         document.getElementById('topbarTitle').innerText = titles[tabId];
         
@@ -989,6 +1317,110 @@
     }
 
     // --- API CALLS ---
+
+    async function fetchWeatherData() {
+        let lat = document.getElementById('weatherLat').value.trim();
+        let lon = document.getElementById('weatherLon').value.trim();
+        const start = document.getElementById('weatherStart').value;
+        const end = document.getElementById('weatherEnd').value;
+        
+        if (!lat) lat = '24.3745';
+        if (!lon) lon = '88.6042';
+        
+        const resEl = document.getElementById('weatherRes');
+        resEl.style.display = 'block';
+        setResponse('weatherRes', 'Fetching data from Open Meteo API...');
+        
+        try {
+            let url = 'https://weatherapi.espserver.site/v1/forecast';
+            const params = new URLSearchParams();
+            params.append('latitude', lat);
+            params.append('longitude', lon);
+            params.append('current', 'temperature_2m,relative_humidity_2m,precipitation,weather_code');
+            params.append('minutely_15', 'temperature_2m,relative_humidity_2m,precipitation');
+            params.append('hourly', 'temperature_2m,relative_humidity_2m,rain');
+            params.append('past_days', '1');
+            params.append('timezone', 'auto');
+            
+            if (start) params.append('start_date', start);
+            if (end) params.append('end_date', end);
+            
+            const queryString = params.toString();
+            if (queryString) {
+                url += '?' + queryString;
+            }
+            
+            const res = await fetch(url, { cache: 'no-store' });
+            const data = await safeFetchParse(res);
+            window.lastWeatherData = data;
+            
+            if (res.ok) {
+                showSpecificWeather('current');
+            } else {
+                setResponse('weatherRes', data, true);
+            }
+        } catch(err) {
+            setResponse('weatherRes', "Network Error: " + err.message, true);
+        }
+    }
+
+    function showSpecificWeather(type) {
+        if (!window.lastWeatherData || !window.lastWeatherData.current) {
+            alert("Please fetch weather data first.");
+            return;
+        }
+        const data = window.lastWeatherData;
+        let resultHtml = "";
+        
+        if (type === 'current') {
+            if (data.current) {
+                resultHtml = `
+                <div style="background: rgba(15, 23, 42, 0.8); padding: 1rem; border-radius: 0.5rem; border: 1px solid var(--success);">
+                    <h4 style="color: var(--success); margin-bottom: 0.5rem;">Current Weather (${new Date(data.current.time).toLocaleString()})</h4>
+                    <p><strong>Temperature:</strong> ${data.current.temperature_2m} °C</p>
+                    <p><strong>Humidity:</strong> ${data.current.relative_humidity_2m} %</p>
+                    <p><strong>Precipitation:</strong> ${data.current.precipitation} mm</p>
+                </div>
+                `;
+            }
+        } else if (type === '15min') {
+            if (data.minutely_15 && data.minutely_15.time) {
+                const now = new Date();
+                const targetTime = new Date(now.getTime() - 15 * 60000);
+                
+                let closestIdx = -1;
+                let minDiff = Infinity;
+                
+                data.minutely_15.time.forEach((t, idx) => {
+                    const tDate = new Date(t);
+                    const diff = Math.abs(targetTime - tDate);
+                    if (diff < minDiff) {
+                        minDiff = diff;
+                        closestIdx = idx;
+                    }
+                });
+                
+                if (closestIdx !== -1) {
+                    resultHtml = `
+                    <div style="background: rgba(15, 23, 42, 0.8); padding: 1rem; border-radius: 0.5rem; border: 1px solid var(--warning);">
+                        <h4 style="color: var(--warning); margin-bottom: 0.5rem;">Weather 15 Mins Ago (${new Date(data.minutely_15.time[closestIdx]).toLocaleString()})</h4>
+                        <p><strong>Temperature:</strong> ${data.minutely_15.temperature_2m[closestIdx]} °C</p>
+                        <p><strong>Humidity:</strong> ${data.minutely_15.relative_humidity_2m[closestIdx]} %</p>
+                        <p><strong>Precipitation:</strong> ${data.minutely_15.precipitation[closestIdx]} mm</p>
+                    </div>
+                    `;
+                }
+            }
+        }
+        
+        if (resultHtml) {
+            document.getElementById('weatherRes').innerHTML = resultHtml;
+            document.getElementById('weatherRes').classList.remove('error');
+        } else {
+            setResponse('weatherRes', 'Data not found in response.', true);
+        }
+    }
+
     document.getElementById('loginForm').addEventListener('submit', async (e) => {
         e.preventDefault();
         const email = document.getElementById('loginEmail').value;
@@ -1084,6 +1516,7 @@
 
             const devices = await safeFetchParse(res);
             if(res.ok && Array.isArray(devices)) {
+                window.allDevices = devices;
                 // Populate dropdowns for Transfer and Export
                 const sourceSelect = document.getElementById('transferSourceUid');
                 const exportSelect = document.getElementById('exportDeviceUid');
@@ -1180,6 +1613,15 @@
                                         ${lastSeenText}
                                     </div>
                                     <div class="dc-actions">
+                                        <button class="btn-icon" onclick="event.stopPropagation(); openSyncDateModal('${dev.uid}')" title="Sync Historical Data" style="color: var(--success);">
+                                            <span class="material-icons-round">sync</span>
+                                        </button>
+                                        <button class="btn-icon" onclick="event.stopPropagation(); openDataUpdater('${dev.uid}')" title="Data Updater" style="color: var(--warning);">
+                                            <span class="material-icons-round">edit</span>
+                                        </button>
+                                        <button class="btn-icon" onclick="event.stopPropagation(); openWeatherForDevice('${dev.latitude || ''}', '${dev.longitude || ''}')" title="Get Weather" style="color: #3b82f6;">
+                                            <span class="material-icons-round">cloud</span>
+                                        </button>
                                         <button class="btn-icon transfer-btn" onclick="event.stopPropagation(); promptReplaceDevice('${dev.uid}')" title="Transfer Data">
                                             <span class="material-icons-round">swap_horiz</span>
                                         </button>
@@ -1218,6 +1660,598 @@
                 card.style.display = 'none';
             }
         });
+    }
+
+    function openDataUpdater(uid) {
+        if (!window.allDevices) return;
+        const dev = window.allDevices.find(d => d.uid === uid);
+        if (!dev) return;
+        
+        switchTab('data_updater');
+
+        document.getElementById('updaterUid').value = dev.uid || '';
+        document.getElementById('updaterName').value = dev.name || '';
+        document.getElementById('updaterLocation').value = dev.location || '';
+        document.getElementById('updaterInstitution').value = dev.institution || '';
+        document.getElementById('updaterLat').value = dev.latitude || '';
+        document.getElementById('updaterLon').value = dev.longitude || '';
+        document.getElementById('updaterWaterLevel').value = dev.water_level || '';
+        document.getElementById('updaterStatus').value = dev.status || 'offline';
+        
+        let lastSeenText = 'Never';
+        if (dev.lastSeen) {
+            const d = new Date(dev.lastSeen);
+            lastSeenText = d.toLocaleString();
+        }
+        document.getElementById('updaterLastSeen').value = lastSeenText;
+        
+        document.getElementById('updaterRes').style.display = 'none';
+        document.getElementById('updaterWeatherRes').style.display = 'none';
+
+        // Set default dates to last 7 days up to today
+        const endD = new Date();
+        const startD = new Date();
+        startD.setDate(endD.getDate() - 7);
+        
+        document.getElementById('updaterWeatherEnd').value = endD.toISOString().split('T')[0];
+        document.getElementById('updaterWeatherStart').value = startD.toISOString().split('T')[0];
+
+        // Auto fetch date-to-date data if coordinates exist
+        if (dev.latitude && dev.longitude) {
+            fetchUpdaterWeather();
+        } else {
+            document.getElementById('updaterWeatherRes').style.display = 'block';
+            document.getElementById('updaterWeatherRes').innerHTML = '<div style="color:var(--text-muted); padding:1rem; text-align:center; background:var(--bg-dark); border-radius:0.5rem;">Device has no valid coordinates. Cannot fetch weather history.</div>';
+            document.getElementById('updaterWeatherRes').classList.remove('error');
+        }
+    }
+
+    async function submitDataUpdate() {
+        const uid = document.getElementById('updaterUid').value;
+        if (!uid) return;
+        
+        const payload = {
+            name: document.getElementById('updaterName').value,
+            location: document.getElementById('updaterLocation').value,
+            institution: document.getElementById('updaterInstitution').value,
+            latitude: document.getElementById('updaterLat').value ? parseFloat(document.getElementById('updaterLat').value) : undefined,
+            longitude: document.getElementById('updaterLon').value ? parseFloat(document.getElementById('updaterLon').value) : undefined,
+            water_level: document.getElementById('updaterWaterLevel').value ? parseFloat(document.getElementById('updaterWaterLevel').value) : undefined
+        };
+
+        const resEl = document.getElementById('updaterRes');
+        resEl.style.display = 'block';
+        setResponse('updaterRes', 'Updating device...');
+
+        try {
+            const res = await fetch(`${getBaseUrl()}/api/admin/device/${uid}`, {
+                method: 'PUT',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${authToken}`
+                },
+                body: JSON.stringify(payload)
+            });
+            const data = await safeFetchParse(res);
+            setResponse('updaterRes', data, !res.ok);
+            if (res.ok) {
+                fetchMyDevices();
+            }
+        } catch(err) {
+            setResponse('updaterRes', "Network Error: " + err.message, true);
+        }
+    }
+
+    let updaterWeatherChartObj = null;
+    let updaterRawDataCache = '';
+
+    async function fetchLocationName(lat, lon) {
+        try {
+            const res = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=en`);
+            const data = await res.json();
+            const locName = data.city || data.locality || data.principalSubdivision || 'Unknown Region';
+            const country = data.countryName || '';
+            document.getElementById('updaterLocationText').innerText = `${locName}${country ? ', ' + country : ''}`;
+        } catch(e) {
+            document.getElementById('updaterLocationText').innerText = `Lat: ${lat}, Lon: ${lon}`;
+        }
+    }
+
+    function patchApparentTemperature(times, t2m, appT, hum, wind) {
+        for (let i = 0; i < times.length; i++) {
+            if (appT[i] === null || appT[i] === undefined) {
+                // If we don't have apparent temp from API, calculate Apparent Temperature
+                const t = t2m[i] || 0;
+                const h = hum[i] || 0;
+                const w = wind[i] || 0;
+                
+                // e = vapor pressure
+                const e = (h / 100) * 6.105 * Math.exp((17.27 * t) / (237.7 + t));
+                // AT = Ta + 0.33*e - 0.70*ws - 4.00  (ws in m/s, OpenMeteo gives km/h so ws = wind/3.6)
+                const ws = w / 3.6;
+                const at = t + 0.33 * e - 0.70 * ws - 4.00;
+                
+                appT[i] = parseFloat(at.toFixed(1));
+            }
+        }
+    }
+
+    function processAnalytics(times, t2m, precip) {
+        if (!times || times.length === 0) return;
+        
+        let validTemp = t2m.filter(t => t !== null && t !== undefined);
+        let validPrecip = precip.filter(p => p !== null && p !== undefined);
+
+        const maxT = validTemp.length ? Math.max(...validTemp) : 0;
+        const minT = validTemp.length ? Math.min(...validTemp) : 0;
+        const avgT = validTemp.length ? (validTemp.reduce((a,b)=>a+b,0) / validTemp.length) : 0;
+        const sumRain = validPrecip.length ? validPrecip.reduce((a,b)=>a+b,0) : 0;
+
+        const kpiHtml = `
+            <div class="card" style="padding: 1rem; border-left: 4px solid var(--danger);">
+                <div style="font-size: 0.8rem; color: var(--text-muted);"><span class="material-icons-round" style="font-size:1rem; vertical-align:middle; color:var(--danger);">thermostat</span> Max Temp</div>
+                <div style="font-size: 1.5rem; font-weight: 600; margin-top: 0.5rem;">${maxT.toFixed(1)} <span style="font-size:1rem; font-weight:normal; color:var(--text-muted);">°C</span></div>
+            </div>
+            <div class="card" style="padding: 1rem; border-left: 4px solid var(--primary);">
+                <div style="font-size: 0.8rem; color: var(--text-muted);"><span class="material-icons-round" style="font-size:1rem; vertical-align:middle; color:var(--primary);">ac_unit</span> Min Temp</div>
+                <div style="font-size: 1.5rem; font-weight: 600; margin-top: 0.5rem;">${minT.toFixed(1)} <span style="font-size:1rem; font-weight:normal; color:var(--text-muted);">°C</span></div>
+            </div>
+            <div class="card" style="padding: 1rem; border-left: 4px solid var(--warning);">
+                <div style="font-size: 0.8rem; color: var(--text-muted);"><span class="material-icons-round" style="font-size:1rem; vertical-align:middle; color:var(--warning);">analytics</span> Avg Temp</div>
+                <div style="font-size: 1.5rem; font-weight: 600; margin-top: 0.5rem;">${avgT.toFixed(1)} <span style="font-size:1rem; font-weight:normal; color:var(--text-muted);">°C</span></div>
+            </div>
+            <div class="card" style="padding: 1rem; border-left: 4px solid var(--success);">
+                <div style="font-size: 0.8rem; color: var(--text-muted);"><span class="material-icons-round" style="font-size:1rem; vertical-align:middle; color:var(--success);">water_drop</span> Total Rain</div>
+                <div style="font-size: 1.5rem; font-weight: 600; margin-top: 0.5rem;">${sumRain.toFixed(1)} <span style="font-size:1rem; font-weight:normal; color:var(--text-muted);">mm</span></div>
+            </div>
+        `;
+        document.getElementById('updaterKpiCards').innerHTML = kpiHtml;
+    }
+
+    function renderUpdaterCharts(times, t2m, hum, precip, intervalStr) {
+        if (updaterWeatherChartObj) {
+            updaterWeatherChartObj.destroy();
+        }
+        const ctx = document.getElementById('updaterWeatherChart').getContext('2d');
+        
+        // Format labels based on interval
+        const labels = times.map(t => {
+            const d = new Date(t);
+            if (intervalStr === 'daily') return d.toLocaleDateString(undefined, {month:'short', day:'numeric'});
+            return d.toLocaleDateString(undefined, {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
+        });
+
+        updaterWeatherChartObj = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: 'Temperature (°C)',
+                        data: t2m,
+                        borderColor: '#ef4444',
+                        backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                        borderWidth: 2,
+                        yAxisID: 'y',
+                        tension: 0.4,
+                        fill: true
+                    },
+                    {
+                        label: 'Humidity (%)',
+                        data: hum,
+                        borderColor: '#3b82f6',
+                        backgroundColor: 'transparent',
+                        borderWidth: 2,
+                        yAxisID: 'y1',
+                        tension: 0.4,
+                        borderDash: [5, 5]
+                    },
+                    {
+                        label: 'Precipitation (mm)',
+                        data: precip,
+                        type: 'bar',
+                        backgroundColor: 'rgba(16, 185, 129, 0.5)',
+                        borderColor: '#10b981',
+                        borderWidth: 1,
+                        yAxisID: 'y2'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
+                plugins: {
+                    legend: {
+                        labels: { color: '#94a3b8' }
+                    }
+                },
+                scales: {
+                    x: {
+                        ticks: { color: '#94a3b8', maxRotation: 45, minRotation: 45 }
+                    },
+                    y: {
+                        type: 'linear',
+                        display: true,
+                        position: 'left',
+                        title: { display: true, text: 'Temperature (°C)', color: '#ef4444' },
+                        ticks: { color: '#94a3b8' },
+                        grid: { color: 'rgba(255,255,255,0.05)' }
+                    },
+                    y1: {
+                        type: 'linear',
+                        display: true,
+                        position: 'right',
+                        title: { display: true, text: 'Humidity (%)', color: '#3b82f6' },
+                        ticks: { color: '#94a3b8' },
+                        grid: { drawOnChartArea: false }
+                    },
+                    y2: {
+                        type: 'linear',
+                        display: true,
+                        position: 'right',
+                        title: { display: true, text: 'Precipitation (mm)', color: '#10b981' },
+                        ticks: { color: '#94a3b8' },
+                        grid: { drawOnChartArea: false }
+                    }
+                }
+            }
+        });
+    }
+
+    function renderUpdaterTable(times, t2m, appT, hum, precip, wind, code, interval) {
+        const showTemp = document.getElementById('chkTemp').checked;
+        const showAppTemp = document.getElementById('chkAppTemp').checked;
+        const showHum = document.getElementById('chkHum').checked;
+        const showPrecip = document.getElementById('chkPrecip').checked;
+        const showWind = document.getElementById('chkWind').checked;
+        const showCode = document.getElementById('chkCode').checked;
+
+        let html = `<div class="table-responsive" style="max-height: 400px; margin: 0; border: 1px solid var(--border-color); border-radius: 0.5rem;">
+            <table class="data-table" style="margin: 0; width: 100%;">
+                <thead style="position: sticky; top: 0; background: var(--bg-dark); z-index: 1; box-shadow: 0 1px 0 var(--border-color);">
+                    <tr>
+                        <th style="padding: 0.75rem;">Date & Time</th>
+                        ${showTemp ? '<th style="padding: 0.75rem;">Temp (°C)</th>' : ''}
+                        ${showAppTemp ? '<th style="padding: 0.75rem;">Feels Like</th>' : ''}
+                        ${showHum ? '<th style="padding: 0.75rem;">Hum (%)</th>' : ''}
+                        ${showPrecip ? '<th style="padding: 0.75rem;">Precip (mm)</th>' : ''}
+                        ${showWind ? '<th style="padding: 0.75rem;">Wind (km/h)</th>' : ''}
+                        ${showCode ? '<th style="padding: 0.75rem;">Status</th>' : ''}
+                    </tr>
+                </thead>
+                <tbody id="updaterTableBody">`;
+        
+        const maxRows = times.length;
+        for (let i = 0; i < maxRows; i++) {
+            let timeStr = '';
+            if (interval === 'daily') {
+                timeStr = new Date(times[i]).toLocaleDateString();
+            } else {
+                timeStr = new Date(times[i]).toLocaleString();
+            }
+
+            // WMO Thunderstorm Alert Badge
+            let codeDisplay = code[i] !== undefined && code[i] !== null ? code[i] : '--';
+            if (showCode && (code[i] === 95 || code[i] === 96 || code[i] === 99)) {
+                codeDisplay = `<span style="background: rgba(239, 68, 68, 0.2); color: #ef4444; padding: 0.1rem 0.5rem; border-radius: 1rem; font-size: 0.75rem; font-weight: 600;"><span class="material-icons-round" style="font-size:0.8rem; vertical-align:middle;">bolt</span> Thunderstorm (${code[i]})</span>`;
+            }
+
+            html += `<tr>
+                <td style="padding: 0.5rem 0.75rem; border-top: 1px solid var(--border-color);">${timeStr}</td>
+                ${showTemp ? `<td style="padding: 0.5rem 0.75rem; border-top: 1px solid var(--border-color);">${t2m[i] !== undefined && t2m[i] !== null ? t2m[i] : '--'}</td>` : ''}
+                ${showAppTemp ? `<td style="padding: 0.5rem 0.75rem; border-top: 1px solid var(--border-color);">${appT[i] !== undefined && appT[i] !== null ? appT[i] : '--'}</td>` : ''}
+                ${showHum ? `<td style="padding: 0.5rem 0.75rem; border-top: 1px solid var(--border-color);">${hum[i] !== undefined && hum[i] !== null ? hum[i] : '--'}</td>` : ''}
+                ${showPrecip ? `<td style="padding: 0.5rem 0.75rem; border-top: 1px solid var(--border-color);">${precip[i] !== undefined && precip[i] !== null ? precip[i] : '--'}</td>` : ''}
+                ${showWind ? `<td style="padding: 0.5rem 0.75rem; border-top: 1px solid var(--border-color);">${wind[i] !== undefined && wind[i] !== null ? wind[i] : '--'}</td>` : ''}
+                ${showCode ? `<td style="padding: 0.5rem 0.75rem; border-top: 1px solid var(--border-color);">${codeDisplay}</td>` : ''}
+            </tr>`;
+        }
+        html += `</tbody></table></div>`;
+        
+        updaterRawDataCache = html;
+        document.getElementById('updaterWeatherRes').innerHTML = html;
+        
+        const countSpan = document.getElementById('updaterTableCount');
+        countSpan.style.display = 'inline-block';
+        countSpan.innerText = `${maxRows} rows`;
+    }
+
+    function filterUpdaterTable() {
+        const query = document.getElementById('updaterTableSearch').value.toLowerCase();
+        if (!updaterRawDataCache) return;
+        
+        const countSpan = document.getElementById('updaterTableCount');
+
+        // If empty, restore original
+        if (query.trim() === '') {
+            document.getElementById('updaterWeatherRes').innerHTML = updaterRawDataCache;
+            const originalRows = document.createElement('div');
+            originalRows.innerHTML = updaterRawDataCache;
+            countSpan.innerText = `${originalRows.querySelectorAll('tbody tr').length} rows`;
+            return;
+        }
+
+        // We can create a temporary div to parse and filter the rows
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = updaterRawDataCache;
+        const rows = tempDiv.querySelectorAll('tbody tr');
+        let visibleCount = 0;
+        rows.forEach(row => {
+            if (row.innerText.toLowerCase().includes(query)) {
+                row.style.display = '';
+                visibleCount++;
+            } else {
+                row.style.display = 'none';
+            }
+        });
+        document.getElementById('updaterWeatherRes').innerHTML = tempDiv.innerHTML;
+        countSpan.innerText = `${visibleCount} rows`;
+    }
+
+    function setUpdaterDatesAndFetch(start, end) {
+        document.getElementById('updaterWeatherStart').value = start;
+        document.getElementById('updaterWeatherEnd').value = end;
+        fetchUpdaterWeather();
+    }
+
+    async function fetchUpdaterWeather() {
+        const lat = document.getElementById('updaterLat').value;
+        const lon = document.getElementById('updaterLon').value;
+        const start = document.getElementById('updaterWeatherStart').value;
+        const end = document.getElementById('updaterWeatherEnd').value;
+        const container = document.getElementById('updaterDashboardContainer');
+
+        if (!lat || !lon || !start || !end) {
+            alert("Please ensure Latitude, Longitude, Start Date, and End Date are set.");
+            return;
+        }
+
+        // Parallel Location Fetch
+        fetchLocationName(lat, lon);
+
+        document.getElementById('updaterWeatherRes').innerHTML = '<div style="color:var(--info); padding:1rem; text-align:center;">Fetching Data...</div>';
+        container.style.display = 'block';
+
+        const interval = document.getElementById('updaterWeatherInterval').value;
+        const model = document.getElementById('updaterWeatherModel').value;
+        
+        try {
+            let url = 'https://weatherapi.espserver.site/v1/forecast';
+            const params = new URLSearchParams();
+            params.append('latitude', lat);
+            params.append('longitude', lon);
+            params.append('start_date', start);
+            params.append('end_date', end);
+            params.append('timezone', 'auto');
+
+            const isDaily = (interval === 'daily');
+
+            // Build requested variables based on checkboxes plus implicit requirements
+            let vars = [];
+            if (document.getElementById('chkTemp').checked) {
+                vars.push(isDaily ? 'temperature_2m_max,temperature_2m_min' : 'temperature_2m');
+            }
+            if (document.getElementById('chkHum').checked) {
+                // Open-Meteo typically uses relative_humidity_2m_max/mean for daily, we'll request a generic available daily if possible. If not, we fall back or use hourly. For simplicity, we'll try to request it.
+                vars.push(isDaily ? 'relative_humidity_2m_max' : 'relative_humidity_2m'); 
+            }
+            if (document.getElementById('chkPrecip').checked) vars.push(isDaily ? 'precipitation_sum' : 'precipitation');
+            if (document.getElementById('chkCode').checked) vars.push('weather_code');
+            
+            // "Feels Like" implicit logic: Always fetch wind speed to allow Heat Index fallback calculation!
+            let needsAppTemp = document.getElementById('chkAppTemp').checked;
+            if (needsAppTemp || document.getElementById('chkWind').checked) {
+                vars.push(isDaily ? 'wind_speed_10m_max' : 'wind_speed_10m');
+                vars.push(isDaily ? 'apparent_temperature_max' : 'apparent_temperature');
+                if (!vars.includes(isDaily ? 'temperature_2m_max,temperature_2m_min' : 'temperature_2m')) {
+                    vars.push(isDaily ? 'temperature_2m_max,temperature_2m_min' : 'temperature_2m');
+                }
+                if (!isDaily && !vars.includes('relative_humidity_2m')) {
+                    vars.push('relative_humidity_2m'); // needed for fallback calculation
+                }
+            }
+
+            // Remove duplicates and join
+            const varsString = [...new Set(vars.join(',').split(','))].filter(v=>v).join(',');
+
+            if (model !== 'best_match') {
+                params.append('models', model);
+            }
+
+            if (isDaily) {
+                params.append('daily', varsString);
+            } else if (interval === '60') {
+                params.append('hourly', varsString);
+            } else {
+                params.append('minutely_15', varsString);
+            }
+
+            const res = await fetch(url + '?' + params.toString());
+            const data = await safeFetchParse(res);
+
+            if (!res.ok) {
+                document.getElementById('updaterWeatherRes').innerHTML = `<div style="color:var(--danger); padding:1rem; text-align:center;">${data.reason || 'Error fetching data'}</div>`;
+                return;
+            }
+
+            let times=[], t2m=[], appT=[], hum=[], precip=[], wind=[], code=[];
+            
+            if (isDaily && data.daily && data.daily.time) {
+                times = data.daily.time;
+                t2m = data.daily.temperature_2m_max || [];
+                appT = data.daily.apparent_temperature_max || [];
+                hum = data.daily.relative_humidity_2m_max || new Array(times.length).fill(0); 
+                precip = data.daily.precipitation_sum || [];
+                wind = data.daily.wind_speed_10m_max || [];
+                code = data.daily.weather_code || [];
+            } else if (interval === '60' && data.hourly && data.hourly.time) {
+                times = data.hourly.time;
+                t2m = data.hourly.temperature_2m || [];
+                appT = data.hourly.apparent_temperature || [];
+                hum = data.hourly.relative_humidity_2m || [];
+                precip = data.hourly.precipitation || [];
+                wind = data.hourly.wind_speed_10m || [];
+                code = data.hourly.weather_code || [];
+            } else if (data.minutely_15 && data.minutely_15.time) {
+                const step = parseInt(interval) / 15;
+                for (let i = 0; i < data.minutely_15.time.length; i += step) {
+                    times.push(data.minutely_15.time[i]);
+                    t2m.push(data.minutely_15.temperature_2m ? data.minutely_15.temperature_2m[i] : null);
+                    appT.push(data.minutely_15.apparent_temperature ? data.minutely_15.apparent_temperature[i] : null);
+                    hum.push(data.minutely_15.relative_humidity_2m ? data.minutely_15.relative_humidity_2m[i] : null);
+                    precip.push(data.minutely_15.precipitation ? data.minutely_15.precipitation[i] : null);
+                    wind.push(data.minutely_15.wind_speed_10m ? data.minutely_15.wind_speed_10m[i] : null);
+                    code.push(data.minutely_15.weather_code ? data.minutely_15.weather_code[i] : null);
+                }
+            }
+
+            if (times.length > 0) {
+                // Apply fail-safe logic for apparent temperature
+                if (needsAppTemp) {
+                    patchApparentTemperature(times, t2m, appT, hum, wind);
+                }
+                
+                // Render modules
+                processAnalytics(times, t2m, precip);
+                renderUpdaterCharts(times, t2m, hum, precip, interval);
+                renderUpdaterTable(times, t2m, appT, hum, precip, wind, code, interval);
+            } else {
+                document.getElementById('updaterWeatherRes').innerHTML = '<div style="color:var(--warning); padding:1rem; text-align:center;">No data found for this interval.</div>';
+            }
+        } catch(err) {
+            document.getElementById('updaterWeatherRes').innerHTML = `<div style="color:var(--danger); padding:1rem; text-align:center;">Network Error: ${err.message}</div>`;
+        }
+    }
+
+    async function openWeatherForDevice(lat, lon) {
+        const modal = document.getElementById('weatherModal');
+        modal.classList.add('active');
+        document.getElementById('weatherModalBody').innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 2rem;">Fetching Instant Geo Weather...</div>';
+
+        if (!lat) lat = '24.3745';
+        if (!lon) lon = '88.6042';
+
+        try {
+            let url = 'https://weatherapi.espserver.site/v1/forecast';
+            const params = new URLSearchParams();
+            params.append('latitude', lat);
+            params.append('longitude', lon);
+            params.append('current', 'temperature_2m,apparent_temperature,relative_humidity_2m,precipitation');
+            params.append('minutely_15', 'temperature_2m,apparent_temperature,relative_humidity_2m,precipitation');
+            params.append('past_days', '1');
+            params.append('timezone', 'auto');
+            
+            const res = await fetch(url + '?' + params.toString(), { cache: 'no-store' });
+            const data = await safeFetchParse(res);
+            
+            if (res.ok && data.current && data.minutely_15) {
+                const now = new Date();
+                const pastTime = new Date(now.getTime() - 15 * 60000);
+                const futureTime = new Date(now.getTime() + 15 * 60000);
+                
+                let pastIdx = -1, futureIdx = -1;
+                let minPastDiff = Infinity, minFutureDiff = Infinity;
+                
+                data.minutely_15.time.forEach((t, idx) => {
+                    const tDate = new Date(t);
+                    const diffPast = Math.abs(pastTime - tDate);
+                    const diffFuture = Math.abs(futureTime - tDate);
+                    
+                    if (diffPast < minPastDiff) {
+                        minPastDiff = diffPast;
+                        pastIdx = idx;
+                    }
+                    if (diffFuture < minFutureDiff) {
+                        minFutureDiff = diffFuture;
+                        futureIdx = idx;
+                    }
+                });
+
+                const generateBlock = (title, color, temp, feelsLike, hum, rain, timeStr) => `
+                    <div style="flex: 1; min-width: 180px; background: rgba(15, 23, 42, 0.8); padding: 1rem; border-radius: 0.5rem; border: 1px solid ${color}; color: #fff;">
+                        <div style="color: ${color}; margin-top: 0; margin-bottom: 1rem; font-size: 0.9rem; text-align: center; font-weight: 600;">
+                            ${title}<br><span style="font-size:0.75rem; color:var(--text-muted); font-weight: normal; margin-top:0.25rem; display:block;">${timeStr}</span>
+                        </div>
+                        <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                            <div style="background: rgba(255,255,255,0.05); padding: 0.5rem 0.75rem; border-radius: 6px; display: flex; align-items: center; justify-content: space-between;">
+                                <div style="display: flex; align-items: center; gap: 0.35rem;"><span class="material-icons-round" style="color: var(--warning); font-size: 1.1rem;">thermostat</span> <span style="font-size: 0.75rem; color: var(--text-muted);">Temp</span></div>
+                                <span style="font-size: 1rem; font-weight: bold; color: var(--text-main);">${temp}°C</span>
+                            </div>
+                            <div style="background: rgba(255,255,255,0.05); padding: 0.5rem 0.75rem; border-radius: 6px; display: flex; align-items: center; justify-content: space-between;">
+                                <div style="display: flex; align-items: center; gap: 0.35rem;"><span class="material-icons-round" style="color: var(--warning); font-size: 1.1rem; opacity: 0.7;">device_thermostat</span> <span style="font-size: 0.75rem; color: var(--text-muted);">Feels Like</span></div>
+                                <span style="font-size: 1rem; font-weight: bold; color: var(--text-main);">${feelsLike}°C</span>
+                            </div>
+                            <div style="background: rgba(255,255,255,0.05); padding: 0.5rem 0.75rem; border-radius: 6px; display: flex; align-items: center; justify-content: space-between;">
+                                <div style="display: flex; align-items: center; gap: 0.35rem;"><span class="material-icons-round" style="color: #3b82f6; font-size: 1.1rem;">water_drop</span> <span style="font-size: 0.75rem; color: var(--text-muted);">Hum</span></div>
+                                <span style="font-size: 1rem; font-weight: bold; color: var(--text-main);">${hum}%</span>
+                            </div>
+                            <div style="background: rgba(255,255,255,0.05); padding: 0.5rem 0.75rem; border-radius: 6px; display: flex; align-items: center; justify-content: space-between;">
+                                <div style="display: flex; align-items: center; gap: 0.35rem;"><span class="material-icons-round" style="color: var(--primary); font-size: 1.1rem;">grain</span> <span style="font-size: 0.75rem; color: var(--text-muted);">Rain</span></div>
+                                <span style="font-size: 1rem; font-weight: bold; color: var(--text-main);">${rain}mm</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                let html = `
+                    <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1.5rem; text-align:center;">
+                        <span class="material-icons-round" style="font-size: 1rem; vertical-align: middle;">location_on</span>
+                        Geo: ${lat}, ${lon}
+                    </div>
+                    <div style="display: flex; gap: 1rem; flex-wrap: wrap; justify-content: center; align-items: stretch;">
+                `;
+
+                if (pastIdx !== -1) {
+                    html += generateBlock(
+                        "15 Mins Before", 
+                        "var(--warning)", 
+                        data.minutely_15.temperature_2m[pastIdx], 
+                        data.minutely_15.apparent_temperature?.[pastIdx] ?? data.minutely_15.temperature_2m[pastIdx],
+                        data.minutely_15.relative_humidity_2m[pastIdx], 
+                        data.minutely_15.precipitation[pastIdx],
+                        new Date(data.minutely_15.time[pastIdx]).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
+                    );
+                }
+
+                html += generateBlock(
+                    "Current Weather", 
+                    "var(--success)", 
+                    data.current.temperature_2m, 
+                    data.current.apparent_temperature ?? data.current.temperature_2m,
+                    data.current.relative_humidity_2m, 
+                    data.current.precipitation,
+                    new Date(data.current.time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
+                );
+
+                if (futureIdx !== -1) {
+                    html += generateBlock(
+                        "15 Mins After", 
+                        "var(--info)", 
+                        data.minutely_15.temperature_2m[futureIdx], 
+                        data.minutely_15.apparent_temperature?.[futureIdx] ?? data.minutely_15.temperature_2m[futureIdx],
+                        data.minutely_15.relative_humidity_2m[futureIdx], 
+                        data.minutely_15.precipitation[futureIdx],
+                        new Date(data.minutely_15.time[futureIdx]).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
+                    );
+                }
+
+                html += `</div>`; // Close flex container
+
+                document.getElementById('weatherModalBody').innerHTML = html;
+            } else {
+                document.getElementById('weatherModalBody').innerHTML = `<div style="color:var(--danger); padding:1rem;">Error: ${data.message || 'Could not fetch all required conditions'}</div>`;
+            }
+        } catch(err) {
+            document.getElementById('weatherModalBody').innerHTML = `<div style="color:var(--danger); padding:1rem;">Network Error: ${err.message}</div>`;
+        }
+    }
+
+    function closeWeatherModal() {
+        document.getElementById('weatherModal').classList.remove('active');
     }
 
     function selectDevice(uid) {
@@ -2037,6 +3071,153 @@
         }
     }
 
+    async function fetchArchiveData() {
+        let lat = document.getElementById('archiveLat').value.trim() || '24.3745';
+        let lon = document.getElementById('archiveLon').value.trim() || '88.6042';
+        const start = document.getElementById('archiveStart').value;
+        const end = document.getElementById('archiveEnd').value;
+        
+        const resEl = document.getElementById('archiveRes');
+        const container = document.getElementById('archiveTableContainer');
+        const tbody = document.getElementById('archiveTableBody');
+        
+        container.style.display = 'none';
+        resEl.style.display = 'block';
+        resEl.className = 'response-area';
+        resEl.textContent = 'Fetching 15-minute historical data...';
+        
+        try {
+            let url = 'https://weatherapi.espserver.site/v1/forecast';
+            const params = new URLSearchParams();
+            params.append('latitude', lat);
+            params.append('longitude', lon);
+            params.append('minutely_15', 'temperature_2m,apparent_temperature,relative_humidity_2m,precipitation');
+            params.append('timezone', 'auto');
+            
+            if (start) params.append('start_date', start);
+            if (end) params.append('end_date', end);
+            if (!start && !end) params.append('past_days', '1'); // default
+            
+            const res = await fetch(url + '?' + params.toString(), { cache: 'no-store' });
+            const data = await safeFetchParse(res);
+            
+            if (res.ok && data.minutely_15) {
+                resEl.style.display = 'none';
+                
+                const timeArr = data.minutely_15.time;
+                const tempArr = data.minutely_15.temperature_2m;
+                const feelArr = data.minutely_15.apparent_temperature;
+                const humArr = data.minutely_15.relative_humidity_2m;
+                const rainArr = data.minutely_15.precipitation;
+                
+                if(!timeArr || timeArr.length === 0) {
+                    resEl.style.display = 'block';
+                    resEl.textContent = 'No data available for this range.';
+                    return;
+                }
+                
+                let rowsHtml = '';
+                for (let i = timeArr.length - 1; i >= 0; i--) {
+                    if(tempArr[i] === null && rainArr[i] === null) continue;
+                    
+                    const dt = new Date(timeArr[i]).toLocaleString();
+                    const tmp = tempArr[i] ?? '-';
+                    const fls = feelArr ? (feelArr[i] ?? tmp) : tmp;
+                    const hm = humArr[i] ?? '-';
+                    const rn = rainArr[i] ?? '-';
+                    
+                    rowsHtml += `
+                        <tr>
+                            <td>${dt}</td>
+                            <td>${tmp}</td>
+                            <td>${fls}</td>
+                            <td>${hm}</td>
+                            <td>${rn}</td>
+                        </tr>
+                    `;
+                }
+                
+                tbody.innerHTML = rowsHtml;
+                container.style.display = 'block';
+            } else {
+                setResponse('archiveRes', data, true);
+            }
+        } catch(err) {
+            setResponse('archiveRes', "Network Error: " + err.message, true);
+        }
+    }
+
+    let currentSyncUid = null;
+    
+    // Socket.io initialization for real-time progress
+    const socket = io();
+    socket.on('sync_progress', (data) => {
+        if (data.uid === currentSyncUid) {
+            const progressFill = document.getElementById('syncProgressFill');
+            const progressText = document.getElementById('syncProgressText');
+            if (progressFill) progressFill.style.width = `${data.percent}%`;
+            if (progressText) progressText.innerText = `Updated ${data.current} of ${data.total} data points (${data.percent}%)`;
+        }
+    });
+
+    function openSyncDateModal(uid) {
+        currentSyncUid = uid;
+        document.getElementById('syncStartDate').value = '';
+        document.getElementById('syncEndDate').value = '';
+        document.getElementById('syncDateModal').style.display = 'flex';
+    }
+
+    function closeSyncDateModal() {
+        document.getElementById('syncDateModal').style.display = 'none';
+        currentSyncUid = null;
+    }
+
+    async function executeHistoricalSync() {
+        if (!currentSyncUid) return;
+        
+        const uidToSync = currentSyncUid;
+        const startDate = document.getElementById('syncStartDate').value;
+        const endDate = document.getElementById('syncEndDate').value;
+        
+        closeSyncDateModal();
+        
+        const overlay = document.getElementById('syncOverlay');
+        const progressFill = document.getElementById('syncProgressFill');
+        const progressText = document.getElementById('syncProgressText');
+        
+        if (progressFill) progressFill.style.width = '0%';
+        if (progressText) progressText.innerText = 'Initializing sync process...';
+        if (overlay) overlay.style.display = 'flex';
+
+        try {
+            const payload = { uid: uidToSync };
+            if (startDate) payload.startDate = startDate;
+            if (endDate) payload.endDate = endDate;
+
+            const res = await fetch(`${getBaseUrl()}/api/public/device/sync-historical`, {
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${authToken}` 
+                },
+                body: JSON.stringify(payload)
+            });
+            const data = await safeFetchParse(res);
+            
+            if (overlay) overlay.style.display = 'none';
+
+            if (res.ok) {
+                alert(data.message || 'Sync successful!');
+                fetchMyDevices(); // Refresh
+            } else {
+                alert(data.message || 'Error syncing data');
+            }
+        } catch (err) {
+            if (overlay) overlay.style.display = 'none';
+            alert("Network Error: " + err.message);
+        }
+    }
+
     // INITIALIZATION
     updateTokenDisplay();
     if(authToken) {
@@ -2044,6 +3225,57 @@
         fetchMyDevices();
     }
 </script>
+
+    <!-- WEATHER MODAL -->
+    <div id="weatherModal" class="modal-overlay">
+        <div class="modal-content" style="max-width: 750px; width: 95%;">
+            <span class="material-icons-round modal-close" onclick="closeWeatherModal()">close</span>
+            <div class="modal-header d-flex justify-between" style="align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 1rem; margin-bottom: 1rem;">
+                <h3 style="margin: 0; color: #fff; font-size: 1.25rem;">Instant Geo Weather</h3>
+            </div>
+            <div id="weatherModalBody">
+                <div style="text-align: center; color: var(--text-muted);">Fetching...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SYNC DATE SELECTION MODAL -->
+    <div id="syncDateModal" class="modal-overlay" style="display: none;">
+        <div class="modal-content" style="max-width: 450px; width: 95%;">
+            <span class="material-icons-round modal-close" onclick="closeSyncDateModal()">close</span>
+            <div class="modal-header d-flex justify-between" style="align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 1rem; margin-bottom: 1.5rem;">
+                <h3 style="margin: 0; color: #fff; font-size: 1.25rem;">Sync Historical Data</h3>
+            </div>
+            <div id="syncDateModalBody">
+                <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.5rem;">Select the date range to fetch historical weather data for this device. Leave empty to automatically sync the last 7 days.</p>
+                <div style="margin-bottom: 1rem;">
+                    <label style="display: block; color: var(--text-muted); margin-bottom: 0.5rem; font-size: 0.85rem;">Start Date (Optional)</label>
+                    <input type="date" id="syncStartDate" class="form-control" style="width: 100%; background: rgba(0,0,0,0.2); border: 1px solid var(--border-color); padding: 0.75rem; border-radius: 0.5rem; color: #fff; color-scheme: dark;">
+                </div>
+                <div style="margin-bottom: 1.5rem;">
+                    <label style="display: block; color: var(--text-muted); margin-bottom: 0.5rem; font-size: 0.85rem;">End Date (Optional)</label>
+                    <input type="date" id="syncEndDate" class="form-control" style="width: 100%; background: rgba(0,0,0,0.2); border: 1px solid var(--border-color); padding: 0.75rem; border-radius: 0.5rem; color: #fff; color-scheme: dark;">
+                </div>
+                <button class="btn btn-primary" style="width: 100%; justify-content: center; border-radius: 0.75rem; padding: 0.75rem;" onclick="executeHistoricalSync()">
+                    <span class="material-icons-round">sync</span> Start Sync Process
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- SYNC OVERLAY -->
+    <div id="syncOverlay" class="modal-overlay" style="display: none; z-index: 9999; flex-direction: column; align-items: center; justify-content: center; background: rgba(15, 23, 42, 0.9);">
+        <div style="background: var(--card-bg); padding: 2.5rem; border-radius: 1rem; border: 1px solid var(--border-color); text-align: center; max-width: 450px; width: 90%; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);">
+            <div style="display: flex; justify-content: center; margin-bottom: 1.5rem;">
+                <span class="material-icons-round pulse" style="font-size: 3.5rem; color: var(--success);">sync</span>
+            </div>
+            <h3 style="margin: 0 0 1rem 0; color: #fff; font-size: 1.5rem;">Syncing Historical Data</h3>
+            <p id="syncProgressText" style="color: var(--text-muted); font-size: 0.95rem; margin: 0 0 2rem 0; line-height: 1.5;">Initializing sync process...</p>
+            <div style="width: 100%; background: rgba(255, 255, 255, 0.05); border-radius: 1rem; height: 10px; overflow: hidden; position: relative;">
+                <div id="syncProgressFill" style="position: absolute; top: 0; left: 0; height: 100%; width: 0%; background: var(--success); border-radius: 1rem; transition: width 0.3s ease;"></div>
+            </div>
+        </div>
+    </div>
 
 </body>
 </html>
