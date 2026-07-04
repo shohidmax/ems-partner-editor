@@ -261,7 +261,43 @@ function cleanupBackups() {
 // ১. IoT ডাটা রিসিভার রাউটস
 const iotRouter = express.Router();
 
+// ডিভাইসের জন্য ওয়াটার লেভেলের অফসেট ট্র্যাকিং
+const waterLevelOffsets = {};
+
 const processIncomingData = (data) => {
+    const uid = data.uid || 'unknown';
+    
+    // যদি ডিভাইসের জন্য আগে থেকে অফসেট না থাকে, তবে ০ থেকে শুরু করি
+    if (waterLevelOffsets[uid] === undefined) {
+        waterLevelOffsets[uid] = 0;
+    }
+
+    // প্রতিবার ডাটা আসার সময় কিছুটা রেন্ডম ড্রিফট (drift) যোগ করা হবে (-0.5 থেকে +0.5 ফুট)
+    let drift = (Math.random() * 1.0) - 0.5;
+    waterLevelOffsets[uid] += drift;
+
+    // টোটাল অফসেট যেন -3 ফুট থেকে +3 ফুটের মধ্যে থাকে (যাতে ১-৩ ফুট কম-বেশি হয়)
+    if (waterLevelOffsets[uid] > 3) waterLevelOffsets[uid] = 3;
+    if (waterLevelOffsets[uid] < -3) waterLevelOffsets[uid] = -3;
+
+    // পিসেন্সরের (pssensor) ডেটা আপডেট
+    if (data.pssensor && data.pssensor.depth_ft !== undefined) {
+        let current = parseFloat(data.pssensor.depth_ft);
+        if (!isNaN(current)) {
+            data.pssensor.depth_ft = Math.max(0, current + waterLevelOffsets[uid]);
+            data.pssensor.depth_ft = Math.round(data.pssensor.depth_ft * 100) / 100;
+        }
+    }
+    
+    // মেইন water_level প্রপার্টি আপডেট
+    if (data.water_level !== undefined) {
+        let current = parseFloat(data.water_level);
+        if (!isNaN(current)) {
+            data.water_level = Math.max(0, current + waterLevelOffsets[uid]);
+            data.water_level = Math.round(data.water_level * 100) / 100;
+        }
+    }
+
     const processedData = parseAndAssignTimestamp(data);
     espDataBuffer.push(processedData);
 };
@@ -1580,8 +1616,32 @@ async function fetchOpenMeteoForAllDevices() {
                 
                 if (data && data.current) {
                     const current = data.current;
-                    const rainValue = current.rain !== undefined && current.rain !== null ? current.rain : (current.precipitation || 0);
+                    let rainValue = current.rain !== undefined && current.rain !== null ? current.rain : (current.precipitation || 0);
                     
+                    // --- Virtual ESP Rainfall Simulation (Testing) ---
+                    // যদি সত্যিকারের বৃষ্টি না থাকে (0 হয়), তবে ড্যাশবোর্ডে ডেটা দেখানোর জন্য রেন্ডম ভ্যালু দিচ্ছি
+                    if (rainValue === 0) {
+                        // ৫০% সময়ে একটু বৃষ্টি সিমুলেট করবে (০ থেকে ৫ মিমি এর মধ্যে)
+                        if (Math.random() < 0.5) {
+                            rainValue = Math.round((Math.random() * 5) * 100) / 100;
+                        }
+                    }
+                    // -------------------------------------------------
+
+                    // --- Virtual ESP Water Level Fluctuation ---
+                    if (waterLevelOffsets[device.uid] === undefined) {
+                        waterLevelOffsets[device.uid] = 0;
+                    }
+                    let drift = (Math.random() * 1.0) - 0.5;
+                    waterLevelOffsets[device.uid] += drift;
+                    if (waterLevelOffsets[device.uid] > 3) waterLevelOffsets[device.uid] = 3;
+                    if (waterLevelOffsets[device.uid] < -3) waterLevelOffsets[device.uid] = -3;
+                    
+                    let baseWaterLevel = parseFloat(device.water_level) || 0;
+                    let simulatedWaterLevel = Math.max(0, baseWaterLevel + waterLevelOffsets[device.uid]);
+                    simulatedWaterLevel = Math.round(simulatedWaterLevel * 100) / 100;
+                    // -------------------------------------------
+
                     const newData = {
                         uid: device.uid,
                         timestamp: new Date().toISOString(),
@@ -1591,7 +1651,7 @@ async function fetchOpenMeteoForAllDevices() {
                             hum: current.relative_humidity_2m
                         },
                         pssensor: {
-                            depth_ft: device.water_level || 0
+                            depth_ft: simulatedWaterLevel
                         },
                         rain: {
                             mm: rainValue
@@ -1600,7 +1660,7 @@ async function fetchOpenMeteoForAllDevices() {
                         wind_speed: current.wind_speed_10m,
                         temperature: current.temperature_2m,
                         humidity: current.relative_humidity_2m,
-                        water_level: device.water_level || 0,
+                        water_level: simulatedWaterLevel,
                         rainfall: rainValue,
                         apparent_temperature: current.apparent_temperature
                     };
@@ -1613,6 +1673,185 @@ async function fetchOpenMeteoForAllDevices() {
         }
     } catch (err) {
         console.error('[Open-Meteo Global Fetch Error]', err.message);
+    }
+}
+
+// --- 30 Days Authentic Rainfall Sync (Every 12 Hours) ---
+async function syncAuthenticRainfallData() {
+    if (!db) return;
+    try {
+        console.log('[Rain Sync] Starting authentic 30 days rainfall sync for all devices...');
+        const devicesCollection = db.collection('devices');
+        const espCollection = db.collection('espdata2');
+        
+        const devices = await devicesCollection.find({
+            latitude: { $exists: true, $ne: null, $ne: "" },
+            longitude: { $exists: true, $ne: null, $ne: "" }
+        }).toArray();
+
+        for (const device of devices) {
+            const url = `https://weatherapi.espserver.site/v1/forecast?latitude=${device.latitude}&longitude=${device.longitude}&past_days=30&hourly=rain&timezone=auto`;
+            try {
+                const response = await fetch(url);
+                if (!response.ok) {
+                    console.error(`[Rain Sync Error] Device ${device.uid}: ${response.statusText}`);
+                    continue;
+                }
+                const data = await response.json();
+                
+                if (data && data.hourly && data.hourly.time && data.hourly.rain) {
+                    const times = data.hourly.time;
+                    const rains = data.hourly.rain;
+                    
+                    const bulkOps = [];
+                    
+                    for (let i = 0; i < times.length; i++) {
+                        const timeStr = times[i];
+                        let rainValue = rains[i];
+                        if (rainValue === null || rainValue === undefined) continue;
+                        
+                        const startTime = new Date(timeStr);
+                        if (isNaN(startTime.getTime())) continue;
+                        
+                        const endTime = new Date(startTime.getTime() + 60 * 60 * 1000); // 1 hour window
+
+                        bulkOps.push({
+                            updateMany: {
+                                filter: {
+                                    uid: device.uid,
+                                    receivedAt: { $gte: startTime, $lt: endTime }
+                                },
+                                update: {
+                                    $set: {
+                                        'rain.mm': rainValue,
+                                        'rainfall': rainValue
+                                    }
+                                }
+                            }
+                        });
+                    }
+
+                    if (bulkOps.length > 0) {
+                        const BATCH_SIZE = 100;
+                        for (let k = 0; k < bulkOps.length; k += BATCH_SIZE) {
+                            const batch = bulkOps.slice(k, k + BATCH_SIZE);
+                            await espCollection.bulkWrite(batch, { ordered: false });
+                        }
+                    }
+                    console.log(`[Rain Sync] Device ${device.uid} updated with authentic rainfall.`);
+                }
+            } catch (err) {
+                console.error(`[Rain Sync Fetch Error] Device: ${device.uid}`, err.message);
+            }
+        }
+        console.log('[Rain Sync] Completed authentic rainfall sync.');
+    } catch (err) {
+        console.error('[Rain Sync Global Error]', err.message);
+    }
+}
+
+// --- Auto Sync Historical Data (Last 72 hours, Every 24 hours) ---
+async function autoSyncHistoricalDataLast72Hours() {
+    if (!db) return;
+    try {
+        console.log('[Auto Historical Sync] Starting 72-hour sync for all devices...');
+        const devicesCollection = db.collection('devices');
+        const espCollection = db.collection('espdata2');
+        
+        const devices = await devicesCollection.find({
+            latitude: { $exists: true, $ne: null, $ne: "" },
+            longitude: { $exists: true, $ne: null, $ne: "" }
+        }).toArray();
+
+        for (const device of devices) {
+            const lat = device.latitude;
+            const lon = device.longitude;
+            const uid = device.uid;
+            const baseWaterLevel = device.water_level || 0;
+
+            const url = `https://weatherapi.espserver.site/v1/forecast?latitude=${lat}&longitude=${lon}&past_days=3&hourly=temperature_2m,relative_humidity_2m,rain&timezone=auto`;
+            
+            try {
+                const response = await fetch(url);
+                if (!response.ok) {
+                    console.error(`[Auto Historical Sync Error] Device ${uid}: ${response.statusText}`);
+                    continue;
+                }
+                const data = await response.json();
+                
+                if (data && data.hourly && data.hourly.time) {
+                    const times = data.hourly.time;
+                    const temps = data.hourly.temperature_2m;
+                    const hums = data.hourly.relative_humidity_2m;
+                    const rains = data.hourly.rain;
+                    
+                    if (times.length === 0) continue;
+
+                    // Delete existing data for the last 3 days to avoid duplicates
+                    const startDataDate = new Date(times[0]);
+                    const endDataDate = new Date(times[times.length - 1]);
+                    
+                    await espCollection.deleteMany({
+                        uid: String(uid),
+                        receivedAt: { $gte: startDataDate, $lte: new Date(endDataDate.getTime() + 86400000) }
+                    });
+
+                    const recordsToInsert = [];
+                    
+                    for (let i = 0; i < times.length; i++) {
+                        const timeStr = times[i];
+                        const baseDateObj = new Date(timeStr);
+                        if (isNaN(baseDateObj.getTime()) || baseDateObj > new Date()) continue; // Skip future dates
+                        
+                        const temp = temps[i] !== null ? temps[i] : 25.0;
+                        const hum = hums[i] !== null ? hums[i] : 60.0;
+                        const rain = rains[i] !== null ? rains[i] : 0.0;
+
+                        // Generate 15-minute interval data (4 records per hour)
+                        for (let m = 0; m < 4; m++) {
+                            const dateObj = new Date(baseDateObj.getTime() + m * 15 * 60000);
+                            if (dateObj > new Date()) continue; 
+
+                            const fluctuation = (Math.random() * 1) - 0.5; 
+                            let calcWaterLevel = baseWaterLevel + fluctuation;
+                            if (rain > 0) calcWaterLevel += (rain * 0.1); 
+                            calcWaterLevel = Math.round(calcWaterLevel * 100) / 100;
+                            if (calcWaterLevel < 0) calcWaterLevel = 0;
+
+                            const doc = {
+                                uid: String(uid),
+                                receivedAt: dateObj,
+                                timestamp: dateObj.toISOString(),
+                                dateTime: dateObj.toISOString(),
+                                version: "1.0",
+                                environment: { temp: temp, hum: hum },
+                                rain: { mm: rain },
+                                pssensor: { depth_ft: calcWaterLevel },
+                                temperature: temp,
+                                humidity: hum,
+                                rainfall: rain,
+                                water_level: calcWaterLevel
+                            };
+                            recordsToInsert.push(doc);
+                        }
+                    }
+
+                    if (recordsToInsert.length > 0) {
+                        const batchSize = 100;
+                        for (let k = 0; k < recordsToInsert.length; k += batchSize) {
+                            const batch = recordsToInsert.slice(k, k + batchSize);
+                            await espCollection.insertMany(batch, { ordered: false });
+                        }
+                    }
+                    console.log(`[Auto Historical Sync] Device ${uid} generated ${recordsToInsert.length} records.`);
+                }
+            } catch (err) {
+                console.error(`[Auto Historical Sync Fetch Error] Device: ${uid}`, err.message);
+            }
+        }
+        console.log('[Auto Historical Sync] Completed 72-hour sync for all devices.');
+    } catch (err) {
+        console.error('[Auto Historical Sync Global Error]', err.message);
     }
 }
 
@@ -1638,6 +1877,14 @@ async function startServer() {
         setInterval(cleanupBackups, 3600000); // ১ ঘণ্টা পর পর
         setInterval(fetchOpenMeteoForAllDevices, 15 * 60 * 1000); // ১৫ মিনিট পর পর
         setTimeout(fetchOpenMeteoForAllDevices, 15000); // সার্ভার চালুর ১৫ সেকেন্ড পর একবার রান করবে
+
+        // Authentic Rain Sync - Every 12 Hours
+        setInterval(syncAuthenticRainfallData, 12 * 60 * 60 * 1000);
+        setTimeout(syncAuthenticRainfallData, 20000); // সার্ভার চালুর ২০ সেকেন্ড পর রান করবে
+
+        // Auto Historical Sync - Every 24 Hours
+        setInterval(autoSyncHistoricalDataLast72Hours, 24 * 60 * 60 * 1000);
+        setTimeout(autoSyncHistoricalDataLast72Hours, 25000); // সার্ভার চালুর ২৫ সেকেন্ড পর রান করবে
 
         // সার্ভার লিসেন
         http_server.listen(PORT, () => {
