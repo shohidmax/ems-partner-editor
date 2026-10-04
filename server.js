@@ -332,7 +332,7 @@ publicRouter.post('/device/data-by-range', authenticateJWT, async (req, res) => 
             query.receivedAt = { $gte: startDate, $lte: endDate };
         }
         
-        const lim = Math.min(20000, Math.max(1, parseInt(limit, 10) || 10000));
+        const lim = Math.min(20000000, Math.max(1, parseInt(limit, 10) || 10000000));
         
         const docs = await req.db.collection('espdata2').find(query)
           .sort({ receivedAt: 1 }) // receivedAt দিয়ে সাজানো
