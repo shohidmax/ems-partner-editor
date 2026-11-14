@@ -76,11 +76,15 @@ app.use((req, res, next) => {
 
 // --- অথেন্টিকেশন মিডলওয়্যার ---
 const authenticateJWT = (req, res, next) => {
+    let token = null;
     const authHeader = req.headers.authorization;
-    if (!authHeader) return res.status(401).send({ success: false, message: 'Authorization header missing' });
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+        token = authHeader.split(' ')[1];
+    } else if (req.query && req.query.token) {
+        token = req.query.token;
+    }
 
-    const token = authHeader.split(' ')[1];
-    if (!token) return res.status(401).send({ success: false, message: 'Token missing' });
+    if (!token) return res.status(401).send({ success: false, message: 'Authorization token missing' });
 
     jwt.verify(token, JWT_SECRET, (err, user) => {
         if (err) return res.status(403).send({ success: false, message: 'Invalid token' });
@@ -318,27 +322,80 @@ const publicRouter = express.Router();
 
 publicRouter.post('/device/data-by-range', authenticateJWT, async (req, res) => {
     try {
+        console.log('[data-by-range Request Body]:', JSON.stringify(req.body));
         const { uid, start, end, limit } = req.body || {};
         if (!uid) return res.status(400).send({ success: false, message: 'uid is required' });
 
         // ফিল্টারিং এর জন্য receivedAt (Date object) ব্যবহার করা হচ্ছে
         const query = { uid: String(uid) };
-        if (start && end) {
-            const startDate = new Date(start);
-            const endDate = new Date(end);
-             if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
-                return res.status(400).send({ success: false, message: 'Invalid date format for start/end' });
+        if (start || end) {
+            query.receivedAt = {};
+            if (start) {
+                const startDate = new Date(start);
+                if (!isNaN(startDate.getTime())) {
+                    query.receivedAt.$gte = startDate;
+                } else {
+                    return res.status(400).send({ success: false, message: 'Invalid start date format' });
+                }
             }
-            query.receivedAt = { $gte: startDate, $lte: endDate };
+            if (end) {
+                let endDate = new Date(end);
+                if (!isNaN(endDate.getTime())) {
+                    if (typeof end === 'string') {
+                        if (end.length === 10) {
+                            endDate = new Date(endDate.getTime() + 86400000 - 1);
+                        } else if (end.length === 16) {
+                            endDate = new Date(endDate.getTime() + 60000 - 1);
+                        }
+                    }
+                    query.receivedAt.$lte = endDate;
+                } else {
+                    return res.status(400).send({ success: false, message: 'Invalid end date format' });
+                }
+            }
+            if (Object.keys(query.receivedAt).length === 0) {
+                delete query.receivedAt;
+            }
         }
         
-        const lim = Math.min(2000, Math.max(1, parseInt(limit, 10) || 1000));
-        
-        const docs = await req.db.collection('espdata2').find(query)
-          .sort({ receivedAt: 1 }) // receivedAt দিয়ে সাজানো
-          .limit(lim)
-          .project({ uid: 1, pssensor: 1, environment: 1, rain: 1, timestamp: 1, dateTime: 1, temperature: 1, water_level: 1, rainfall: 1, receivedAt: 1 })
-          .toArray();
+        let docs;
+        const projection = {
+            _id: 1,
+            uid: 1,
+            pssensor: 1,
+            environment: 1,
+            rain: 1,
+            timestamp: 1,
+            dateTime: 1,
+            temperature: 1,
+            water_level: 1,
+            rainfall: 1,
+            humidity: 1,
+            receivedAt: 1
+        };
+
+        if (query.receivedAt) {
+            // ডেট ফিল্টার অনুযায়ী সব স্টেপ-বাই-স্টেপ ডাটা সরাসরি ফেচ করা হবে (সম্পূর্ণ নিখুঁত ডাটা)
+            const cursor = req.db.collection('espdata2').find(query, { projection })
+              .sort({ receivedAt: 1 });
+            
+            const numLimit = parseInt(limit, 10);
+            if (!isNaN(numLimit) && numLimit > 0 && limit !== 'all') {
+                cursor.limit(numLimit);
+            } else {
+                cursor.limit(35000);
+            }
+            docs = await cursor.toArray();
+        } else {
+            // ডেট ফিল্টার না থাকলে লেটেস্ট ডাটা নেওয়া হবে এবং ক্রমানুসারে সাজানো হবে
+            const numLimit = parseInt(limit, 10);
+            const lim = (!isNaN(numLimit) && numLimit > 0) ? numLimit : 5000;
+            docs = await req.db.collection('espdata2').find(query, { projection })
+              .sort({ receivedAt: -1 })
+              .limit(lim)
+              .toArray();
+            docs.reverse();
+        }
 
         return res.send(docs);
     } catch (error) {
@@ -1169,8 +1226,8 @@ adminRouter.put('/device/:uid', async (req, res) => {
         const updateFields = {};
         if (location !== undefined) updateFields.location = location;
         if (name !== undefined) updateFields.name = name;
-        if (latitude !== undefined) updateFields.latitude = latitude;
-        if (longitude !== undefined) updateFields.longitude = longitude;
+        if (latitude !== undefined) updateFields.latitude = latitude === null || latitude === '' ? null : parseFloat(latitude);
+        if (longitude !== undefined) updateFields.longitude = longitude === null || longitude === '' ? null : parseFloat(longitude);
         if (institution !== undefined) updateFields.institution = institution;
         if (water_level !== undefined) updateFields.water_level = parseFloat(water_level);
 
@@ -1428,7 +1485,7 @@ adminRouter.get('/report', async (req, res) => {
     switch (period) {
         case 'daily':
             group = {
-                _id: { $dateToString: { format: '%Y-%m-%d', date: '$receivedAt', timeZone: 'Asia/Dhaka' } },
+                _id: { $dateToString: { format: '%Y-%m-%d', date: '$receivedAt', timezone: 'Asia/Dhaka' } },
                 avgTemp: { $avg: '$environment.temp' },
                 avgRain: { $sum: '$rain.mm' },
                 count: { $sum: 1 }
@@ -1437,7 +1494,7 @@ adminRouter.get('/report', async (req, res) => {
             break;
         case 'yearly':
             group = {
-                _id: { $year: { date: '$receivedAt', timeZone: 'Asia/Dhaka' } },
+                _id: { $year: { date: '$receivedAt', timezone: 'Asia/Dhaka' } },
                 avgTemp: { $avg: '$environment.temp' },
                 avgRain: { $sum: '$rain.mm' },
                 count: { $sum: 1 }
@@ -1447,7 +1504,7 @@ adminRouter.get('/report', async (req, res) => {
         case 'monthly':
         default:
             group = {
-                _id: { $dateToString: { format: '%Y-%m', date: '$receivedAt', timeZone: 'Asia/Dhaka' } },
+                _id: { $dateToString: { format: '%Y-%m', date: '$receivedAt', timezone: 'Asia/Dhaka' } },
                 avgTemp: { $avg: '$environment.temp' },
                 avgRain: { $sum: '$rain.mm' },
                 count: { $sum: 1 }
@@ -1478,7 +1535,7 @@ adminRouter.get('/report', async (req, res) => {
 
 adminRouter.post('/backup/start', async (req, res) => {
     const { uid } = req.body;
-    const q = uid ? { uid: String(uid) } : {};
+    const q = uid ? { uid: String(uid).trim() } : {};
     const jobId = randomUUID();
     const tmpDir = path.join(os.tmpdir(), `esp-backup-${jobId}`);
     fs.mkdirSync(tmpDir, { recursive: true });
@@ -1491,11 +1548,12 @@ adminRouter.post('/backup/start', async (req, res) => {
     (async () => {
         try {
             job.status = 'exporting';
-            const total = await req.db.collection('espdata2').countDocuments(q);
+            const total = uid ? await req.db.collection('espdata2').countDocuments(q) : await req.db.collection('espdata2').estimatedDocumentCount();
             const out = fs.createWriteStream(path.join(tmpDir, 'espdata.json'), { encoding: 'utf8' });
             out.write('[');
             let first = true, written = 0;
-            for await (const doc of req.db.collection('espdata2').find(q).sort({ receivedAt: 1 })) {
+            const cursor = req.db.collection('espdata2').find(q).sort({ receivedAt: -1 });
+            for await (const doc of cursor) {
                 if (!first) out.write(',');
                 // Clean Output
                 const clean = { 
@@ -1505,22 +1563,27 @@ adminRouter.post('/backup/start', async (req, res) => {
                 };
                 out.write(JSON.stringify(clean));
                 first = false; written++;
-                if (total > 0) job.progress = Math.floor((written / total) * 90);
+                if (total > 0 && written % 100 === 0) {
+                    job.progress = Math.min(90, Math.floor((written / total) * 90));
+                }
             }
             out.write(']'); out.end();
             await new Promise(r => out.on('finish', r));
 
             job.status = 'zipping';
+            job.progress = 92;
             const output = fs.createWriteStream(job.zipPath);
-            const archive = archiver('zip', { zlib: { level: 9 } });
+            const archive = archiver('zip', { zlib: { level: 6 } });
             archive.pipe(output);
             archive.file(path.join(tmpDir, 'espdata.json'), { name: 'espdata.json' });
             await archive.finalize();
             await new Promise(r => output.on('close', r));
 
-            job.status = 'done'; job.progress = 100; job.finishedAt = new Date();
-             const downloadPath = `/api/admin/backup/download/${jobId}`;
-             job.downloadUrl = downloadPath; 
+            const downloadPath = `/api/admin/backup/download/${jobId}`;
+            job.downloadUrl = downloadPath;
+            job.status = 'done';
+            job.progress = 100;
+            job.finishedAt = new Date();
 
         } catch (err) { job.status = 'error'; job.error = err.message; job.finishedAt = new Date(); }
     })();
@@ -1528,51 +1591,37 @@ adminRouter.post('/backup/start', async (req, res) => {
 
 adminRouter.get('/backup/status/:jobId', (req, res) => {
     const jobId = req.params.jobId;
-    const token = req.query.token; // Get token from query string for GET request
-
-    if (!token) return res.status(401).send({ message: 'Token missing' });
+    const job = backupJobs.get(jobId);
+    if (!job) return res.status(404).send({ message: 'Not found' });
     
-    jwt.verify(token, JWT_SECRET, (err, user) => {
-        if (err) return res.status(403).send({ message: 'Invalid token' });
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
 
-        const job = backupJobs.get(jobId);
-        if(!job) return res.status(404).send({message: 'Not found'});
-        
-        res.setHeader('Content-Type', 'text/event-stream');
-        res.setHeader('Cache-Control', 'no-cache');
-        res.setHeader('Connection', 'keep-alive');
+    const sendEvent = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
 
-        const sendEvent = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+    sendEvent({ status: job.status, progress: job.progress, error: job.error, download: job.downloadUrl });
 
-        sendEvent({ status: job.status, progress: job.progress, error: job.error });
+    if (job.status === 'done' || job.status === 'error') {
+        return res.end();
+    }
 
-        if (job.status === 'done' || job.status === 'error') {
-            if (job.status === 'done') {
-                sendEvent({ status: 'done', progress: 100, download: job.downloadUrl });
-            }
+    const iv = setInterval(() => {
+        const currentJob = backupJobs.get(jobId);
+        if (!currentJob) {
+            clearInterval(iv);
             return res.end();
         }
+        
+        sendEvent({ status: currentJob.status, progress: currentJob.progress, error: currentJob.error, download: currentJob.downloadUrl });
+        
+        if (currentJob.status === 'done' || currentJob.status === 'error') {
+            clearInterval(iv);
+            res.end();
+        }
+    }, 1000);
 
-        const iv = setInterval(() => {
-            const currentJob = backupJobs.get(jobId);
-            if (!currentJob) {
-                clearInterval(iv);
-                return res.end();
-            }
-            
-            sendEvent({ status: currentJob.status, progress: currentJob.progress, error: currentJob.error });
-            
-            if (currentJob.status === 'done' || currentJob.status === 'error') {
-                 if (currentJob.status === 'done') {
-                    sendEvent({ status: 'done', progress: 100, download: currentJob.downloadUrl });
-                }
-                clearInterval(iv);
-                res.end();
-            }
-        }, 1000);
-
-        req.on('close', () => clearInterval(iv));
-    });
+    req.on('close', () => clearInterval(iv));
 });
 
 adminRouter.get('/backup/download/:jobId', (req, res) => {
@@ -1860,16 +1909,22 @@ async function startServer() {
     try {
         if (!MONGODB_URI) throw new Error("MONGODB_URI missing in .env");
         
-        const client = new MongoClient(MONGODB_URI);
+        const client = new MongoClient(MONGODB_URI, {
+            maxPoolSize: 50,
+            serverSelectionTimeoutMS: 45000,
+            socketTimeoutMS: 60000,
+            connectTimeoutMS: 30000,
+            waitQueueTimeoutMS: 45000
+        });
         await client.connect();
         db = client.db('Esp32data');
         console.log('[Database] MongoDB Connected Successfully');
 
         // ইনডেক্স তৈরি (একবার রান হবে)
-        db.collection('espdata2').createIndex({ receivedAt: -1 });
-        db.collection('espdata2').createIndex({ uid: 1 });
-        db.collection('users').createIndex({ email: 1 }, { unique: true });
-        db.collection('devices').createIndex({ uid: 1 }, { unique: true });
+        db.collection('espdata2').createIndex({ receivedAt: -1 }).catch(err => console.warn('[Index espdata2]', err.message));
+        db.collection('espdata2').createIndex({ uid: 1 }).catch(err => console.warn('[Index espdata2 uid]', err.message));
+        db.collection('users').createIndex({ email: 1 }, { unique: true }).catch(err => console.warn('[Index users]', err.message));
+        db.collection('devices').createIndex({ uid: 1 }, { unique: true }).catch(err => console.warn('[Index devices]', err.message));
 
         // ক্রোন জবস / টাইমার
         setInterval(processDataBuffer, BATCH_INTERVAL_MS);
@@ -1880,11 +1935,11 @@ async function startServer() {
 
         // Authentic Rain Sync - Every 12 Hours
         setInterval(syncAuthenticRainfallData, 12 * 60 * 60 * 1000);
-        setTimeout(syncAuthenticRainfallData, 20000); // সার্ভার চালুর ২০ সেকেন্ড পর রান করবে
+        setTimeout(syncAuthenticRainfallData, 60000); // সার্ভার চালুর ১ মিনিট পর রান করবে
 
         // Auto Historical Sync - Every 24 Hours
         setInterval(autoSyncHistoricalDataLast72Hours, 24 * 60 * 60 * 1000);
-        setTimeout(autoSyncHistoricalDataLast72Hours, 25000); // সার্ভার চালুর ২৫ সেকেন্ড পর রান করবে
+        setTimeout(autoSyncHistoricalDataLast72Hours, 120000); // সার্ভার চালুর ২ মিনিট পর রান করবে
 
         // সার্ভার লিসেন
         http_server.listen(PORT, () => {
