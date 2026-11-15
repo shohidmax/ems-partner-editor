@@ -59,10 +59,15 @@ if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
 
 // --- মিডলওয়্যার ---
 app.use(helmet({
-    contentSecurityPolicy: false
+    contentSecurityPolicy: false,
+    crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
 app.use(compression());
-app.use(cors());
+app.use(cors({
+    origin: true,
+    credentials: true,
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'token']
+}));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static('public'));
@@ -1630,6 +1635,318 @@ adminRouter.get('/backup/download/:jobId', (req, res) => {
     res.download(job.zipPath, 'espdata.zip');
 });
 
+adminRouter.get('/ai-chats', async (req, res) => {
+    try {
+        const { uid, email, limit = 100 } = req.query;
+        const query = {};
+        if (uid) query.uid = String(uid);
+        if (email) query.userEmail = String(email);
+        const chats = await req.db.collection('device_chats')
+            .find(query)
+            .sort({ timestamp: -1 })
+            .limit(parseInt(limit, 10))
+            .toArray();
+        res.send({ success: true, count: chats.length, chats });
+    } catch (err) {
+        res.status(500).send({ error: err.message });
+    }
+});
+
+// --- Gemini AI Assistant Integration ---
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+
+async function callGeminiAPI(systemInstruction, messages) {
+    if (!GEMINI_API_KEY) {
+        throw new Error('GEMINI_API_KEY is not configured in .env file');
+    }
+    const models = ['gemini-3-flash-preview', 'gemini-flash-latest', 'gemini-flash-lite-latest'];
+    let lastError = null;
+
+    const contents = [];
+    if (messages && messages.length > 0) {
+        messages.forEach(m => {
+            contents.push({
+                role: m.role === 'assistant' ? 'model' : 'user',
+                parts: [{ text: String(m.message || m.text || '') }]
+            });
+        });
+    }
+
+    for (const model of models) {
+        try {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
+            const reqBody = {
+                system_instruction: {
+                    parts: [{ text: systemInstruction }]
+                },
+                contents: contents,
+                generationConfig: {
+                    temperature: 0.7,
+                    maxOutputTokens: 2048
+                }
+            };
+
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(reqBody)
+            });
+
+            const data = await response.json();
+            if (response.ok && data?.candidates?.[0]?.content?.parts?.[0]?.text) {
+                return data.candidates[0].content.parts[0].text;
+            }
+
+            if (!response.ok && data?.error?.message?.includes('system_instruction')) {
+                const fallbackContents = [
+                    { role: 'user', parts: [{ text: `[System Instruction]\n${systemInstruction}\n\n[Conversation]\n` + contents.map(c => `${c.role}: ${c.parts[0].text}`).join('\n') }] }
+                ];
+                const res2 = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ contents: fallbackContents })
+                });
+                const d2 = await res2.json();
+                if (res2.ok && d2?.candidates?.[0]?.content?.parts?.[0]?.text) {
+                    return d2.candidates[0].content.parts[0].text;
+                }
+            }
+
+            lastError = data?.error?.message || `Model ${model} returned status ${response.status}`;
+            console.warn(`[Gemini] ${model} attempt failed:`, lastError);
+        } catch (err) {
+            lastError = err.message;
+            console.warn(`[Gemini] Error calling ${model}:`, err.message);
+        }
+    }
+
+    throw new Error(lastError || 'Gemini AI service unavailable');
+}
+
+// --- AI Chat Router ---
+const aiRouter = express.Router();
+
+aiRouter.post('/ai-chat', authenticateJWT, async (req, res) => {
+    try {
+        const { uid, message } = req.body || {};
+        if (!uid || !message || typeof message !== 'string' || !message.trim()) {
+            return res.status(400).send({ success: false, message: 'uid and message are required' });
+        }
+
+        const user = await req.db.collection('users').findOne({ _id: new ObjectId(req.user.userId) });
+        const userName = user?.name || req.user.email || 'User';
+        const userEmail = req.user.email;
+
+        // 1. Fetch Device Info
+        const device = await req.db.collection('devices').findOne({ uid: String(uid) });
+
+        // 2. Fetch Latest & Recent Sensor Readings from espdata2
+        const recentReadings = await req.db.collection('espdata2')
+            .find({ uid: String(uid) })
+            .sort({ receivedAt: -1 })
+            .limit(20)
+            .toArray();
+
+        let latestTemp = 'N/A', latestHum = 'N/A', latestWater = 'N/A', latestRain = '0', latestTime = 'N/A';
+        let minTemp = null, maxTemp = null, avgTemp = null;
+        let minHum = null, maxHum = null, avgHum = null;
+        let minWater = null, maxWater = null, avgWater = null;
+        let totalRain = 0;
+        let waterTrend = 'Stable';
+        let humTrend = 'Stable';
+
+        if (recentReadings.length > 0) {
+            const first = recentReadings[0];
+            const t = first.environment?.temp ?? first.temperature;
+            const h = first.environment?.hum ?? first.humidity;
+            const w = first.pssensor?.depth_ft ?? first.water_level;
+            const r = first.rain?.mm ?? first.rainfall;
+            
+            latestTemp = (typeof t === 'number' && t !== 85) ? t.toFixed(1) : 'N/A';
+            latestHum = (typeof h === 'number' && h <= 100) ? h.toFixed(1) : 'N/A';
+            latestWater = (typeof w === 'number') ? w.toFixed(2) : '0';
+            latestRain = (typeof r === 'number') ? r.toFixed(2) : '0';
+            latestTime = first.receivedAt ? new Date(first.receivedAt).toLocaleString('en-GB') : (first.timestamp || 'N/A');
+
+            const validTemps = recentReadings.map(d => d.environment?.temp ?? d.temperature).filter(v => typeof v === 'number' && v !== 85);
+            const validHums = recentReadings.map(d => d.environment?.hum ?? d.humidity).filter(v => typeof v === 'number' && v <= 100);
+            const validWaters = recentReadings.map(d => d.pssensor?.depth_ft ?? d.water_level).filter(v => typeof v === 'number');
+            const validRains = recentReadings.map(d => d.rain?.mm ?? d.rainfall).filter(v => typeof v === 'number');
+
+            if (validTemps.length > 0) {
+                minTemp = Math.min(...validTemps).toFixed(1);
+                maxTemp = Math.max(...validTemps).toFixed(1);
+                avgTemp = (validTemps.reduce((a, b) => a + b, 0) / validTemps.length).toFixed(1);
+            }
+            if (validHums.length > 0) {
+                minHum = Math.min(...validHums).toFixed(1);
+                maxHum = Math.max(...validHums).toFixed(1);
+                avgHum = (validHums.reduce((a, b) => a + b, 0) / validHums.length).toFixed(1);
+            }
+            if (validWaters.length > 0) {
+                minWater = Math.min(...validWaters).toFixed(2);
+                maxWater = Math.max(...validWaters).toFixed(2);
+                avgWater = (validWaters.reduce((a, b) => a + b, 0) / validWaters.length).toFixed(2);
+                
+                const newest = validWaters[0];
+                const oldest = validWaters[validWaters.length - 1];
+                if (newest - oldest > 0.3) waterTrend = `Rising (+${(newest - oldest).toFixed(2)} ft)`;
+                else if (oldest - newest > 0.3) waterTrend = `Falling (-${(oldest - newest).toFixed(2)} ft)`;
+                else waterTrend = 'Stable';
+            }
+            if (validHums.length > 1) {
+                const newestH = validHums[0];
+                const oldestH = validHums[validHums.length - 1];
+                if (newestH - oldestH > 5) humTrend = `Increasing (+${(newestH - oldestH).toFixed(1)}%)`;
+                else if (oldestH - newestH > 5) humTrend = `Decreasing (-${(oldestH - newestH).toFixed(1)}%)`;
+                else humTrend = 'Steady';
+            }
+            totalRain = validRains.reduce((a, b) => a + b, 0).toFixed(2);
+        }
+
+        const recentPointsSummary = recentReadings.slice(0, 8).map(d => {
+            const time = d.receivedAt ? new Date(d.receivedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '';
+            const t = d.environment?.temp ?? d.temperature;
+            const h = d.environment?.hum ?? d.humidity;
+            const w = d.pssensor?.depth_ft ?? d.water_level;
+            const r = d.rain?.mm ?? d.rainfall;
+            return `[${time}] Temp: ${t ?? '-'}°C, Hum: ${h ?? '-'}%, Water: ${w ?? '-'}ft, Rain: ${r ?? '-'}mm`;
+        }).join('\n');
+
+        const systemInstruction = `You are EMS AI Assistant (পরিবেশ ও আবহাওয়া পর্যবেক্ষণ সহকারী), an intelligent real-time IoT Environmental Monitoring and Weather Forecasting AI for the Environmental Monitoring Network.
+You are actively monitoring the IoT Device UID: "${uid}".
+
+### Device Metadata:
+- Upazila/Device Name: ${device?.name || 'Unnamed Device'}
+- Location: ${device?.location || 'Unknown Location'}
+- Institution: ${device?.institution || 'Institution N/A'}
+- Coordinates: Latitude ${device?.latitude || 'N/A'}, Longitude ${device?.longitude || 'N/A'}
+- Connection Status: ${device?.status || 'unknown'} (Last seen: ${device?.lastSeen ? new Date(device.lastSeen).toLocaleString('en-GB') : 'Unknown'})
+
+### Current Sensor Readings:
+- Temperature: ${latestTemp} °C
+- Humidity: ${latestHum} %
+- Water Level: ${latestWater} ft
+- Rainfall: ${latestRain} mm
+- Timestamp of latest record: ${latestTime}
+
+### Recent Statistical Range:
+- Temperature: Min ${minTemp ?? 'N/A'}°C, Max ${maxTemp ?? 'N/A'}°C, Avg ${avgTemp ?? 'N/A'}°C
+- Humidity: Min ${minHum ?? 'N/A'}%, Max ${maxHum ?? 'N/A'}%, Avg ${avgHum ?? 'N/A'}%
+- Water Level: Min ${minWater ?? 'N/A'}ft, Max ${maxWater ?? 'N/A'}ft, Avg ${avgWater ?? 'N/A'}ft
+- Water Level Trend: ${waterTrend}
+- Humidity Trend: ${humTrend}
+- Accumulated Rain in recent period: ${totalRain} mm
+
+### Recent Data Points:
+${recentPointsSummary || 'No recent data points recorded.'}
+
+### User Asking:
+- Name: ${userName}
+- Email: ${userEmail}
+
+### Core Directives:
+1. **Device Insights**: Explain any sensor reading clearly. Help the user understand what these values mean for human comfort, agriculture, flood safety, and local environment.
+2. **Future Weather & Hazard Prediction**:
+   - Provide localized weather forecast and environmental prediction based on the device's sensor trends (temperature changes, humidity saturation near 85-100%, atmospheric patterns, water level shifts) and geographic location in Bangladesh.
+   - If water level is rising or high along with high rainfall/humidity, warn about flood or waterlogging danger.
+   - If humidity is very high and temperature is dropping, predict impending rain.
+   - If humidity is moderate/low with steady temperature, predict dry and clear conditions.
+3. **Language**: Always reply in the same language the user asks in (Bengali বাংলা, English, or Banglish). Be respectful, professional, and clear.
+4. **Formatting**: Use neat Markdown (bold key stats, bullet points, headers, emojis 🌡️ 💧 🌊 🌧️ ☀️ ⚠️).`;
+
+        // Previous 6 messages for continuous dialogue context
+        const chatHistory = await req.db.collection('device_chats')
+            .find({ uid: String(uid), userId: req.user.userId })
+            .sort({ timestamp: -1 })
+            .limit(6)
+            .toArray();
+        chatHistory.reverse();
+
+        const messageList = chatHistory.map(c => ({
+            role: c.role,
+            message: c.message
+        }));
+        messageList.push({
+            role: 'user',
+            message: message.trim()
+        });
+
+        const aiReply = await callGeminiAPI(systemInstruction, messageList);
+
+        // Save User Message to Database
+        const userMsgDoc = {
+            uid: String(uid),
+            userId: req.user.userId,
+            userEmail: userEmail,
+            userName: userName,
+            role: 'user',
+            message: message.trim(),
+            timestamp: new Date()
+        };
+        await req.db.collection('device_chats').insertOne(userMsgDoc);
+
+        // Save AI Reply to Database
+        const aiMsgDoc = {
+            uid: String(uid),
+            userId: req.user.userId,
+            userEmail: userEmail,
+            userName: 'EMS AI',
+            role: 'assistant',
+            message: aiReply,
+            timestamp: new Date()
+        };
+        await req.db.collection('device_chats').insertOne(aiMsgDoc);
+
+        return res.send({
+            success: true,
+            reply: aiReply,
+            timestamp: aiMsgDoc.timestamp
+        });
+
+    } catch (error) {
+        console.error('Error in /api/device/ai-chat:', error);
+        return res.status(500).send({
+            success: false,
+            message: error.message || 'Failed to process AI chat request'
+        });
+    }
+});
+
+aiRouter.get('/ai-chat/history', authenticateJWT, async (req, res) => {
+    try {
+        const { uid } = req.query;
+        if (!uid) return res.status(400).send({ success: false, message: 'uid is required' });
+
+        const history = await req.db.collection('device_chats')
+            .find({ uid: String(uid), userId: req.user.userId })
+            .sort({ timestamp: 1 })
+            .limit(100)
+            .toArray();
+
+        return res.send({ success: true, history });
+    } catch (error) {
+        console.error('Error in /api/device/ai-chat/history:', error);
+        return res.status(500).send({ success: false, message: error.message });
+    }
+});
+
+aiRouter.delete('/ai-chat/history', authenticateJWT, async (req, res) => {
+    try {
+        const { uid } = req.query;
+        if (!uid) return res.status(400).send({ success: false, message: 'uid is required' });
+
+        await req.db.collection('device_chats').deleteMany({
+            uid: String(uid),
+            userId: req.user.userId
+        });
+
+        return res.send({ success: true, message: 'Chat history cleared' });
+    } catch (error) {
+        console.error('Error in delete /api/device/ai-chat/history:', error);
+        return res.status(500).send({ success: false, message: error.message });
+    }
+});
 
 // --- রাউটার মাউন্টিং ---
 app.use('/api', iotRouter);
@@ -1637,6 +1954,8 @@ app.use('/api/public', publicRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/user', userRouter);
 app.use('/api/admin', adminRouter);
+app.use('/api/device', aiRouter);
+app.use('/api/ai', aiRouter);
 
 // রুট রুট এবং লগইন পেজ
 app.get(['/', '/login'], (req, res) => {
