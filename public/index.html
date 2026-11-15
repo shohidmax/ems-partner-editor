@@ -486,11 +486,290 @@
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 4px; }
         ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); }
+
+        /* --- FULLSCREEN LOGIN PAGE FIRST --- */
+        .login-page-wrapper {
+            position: fixed;
+            inset: 0;
+            z-index: 9999;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1.5rem;
+            background: #090d16;
+            background-image: 
+                radial-gradient(circle at 15% 15%, rgba(59, 130, 246, 0.22), transparent 45%),
+                radial-gradient(circle at 85% 85%, rgba(168, 85, 247, 0.18), transparent 45%),
+                radial-gradient(circle at 50% 50%, rgba(15, 23, 42, 0.85), #060911 80%);
+            overflow-y: auto;
+        }
+
+        .login-card {
+            width: 100%;
+            max-width: 440px;
+            background: rgba(22, 30, 49, 0.78);
+            backdrop-filter: blur(30px);
+            -webkit-backdrop-filter: blur(30px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 1.5rem;
+            padding: 2.75rem 2.25rem;
+            box-shadow: 
+                0 25px 60px -15px rgba(0, 0, 0, 0.7),
+                0 0 50px -10px rgba(59, 130, 246, 0.2);
+            animation: loginCardFadeIn 0.35s ease-out;
+            position: relative;
+        }
+
+        @keyframes loginCardFadeIn {
+            from { opacity: 0; transform: translateY(16px) scale(0.97); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+
+        .login-brand-header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .login-logo-glow {
+            width: 62px;
+            height: 62px;
+            margin: 0 auto 1.25rem;
+            border-radius: 1.25rem;
+            background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 12px 30px rgba(59, 130, 246, 0.45);
+        }
+
+        .login-logo-glow .material-icons-round {
+            font-size: 2.2rem;
+            color: #ffffff;
+        }
+
+        .login-brand-header h2 {
+            font-size: 1.7rem;
+            font-weight: 700;
+            color: #ffffff;
+            margin-bottom: 0.4rem;
+            letter-spacing: -0.02em;
+        }
+
+        .login-brand-header p {
+            font-size: 0.88rem;
+            color: var(--text-muted);
+            line-height: 1.4;
+        }
+
+        .login-field-group {
+            margin-bottom: 1.25rem;
+            text-align: left;
+        }
+
+        .login-field-group label {
+            display: block;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: #cbd5e1;
+            margin-bottom: 0.45rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .login-input-wrap {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .login-input-wrap .field-icon {
+            position: absolute;
+            left: 1rem;
+            color: var(--text-muted);
+            font-size: 1.25rem;
+            pointer-events: none;
+        }
+
+        .login-input-wrap input {
+            width: 100%;
+            padding: 0.9rem 1rem 0.9rem 2.85rem !important;
+            background: rgba(15, 23, 42, 0.85) !important;
+            border: 1px solid rgba(255, 255, 255, 0.12) !important;
+            border-radius: 0.75rem !important;
+            color: #ffffff !important;
+            font-size: 0.95rem !important;
+            font-family: inherit !important;
+            transition: all 0.2s ease !important;
+            margin-bottom: 0 !important;
+        }
+
+        .login-input-wrap input:focus {
+            outline: none !important;
+            border-color: #3b82f6 !important;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3) !important;
+            background: rgba(15, 23, 42, 0.98) !important;
+        }
+
+        .login-input-wrap .toggle-pass-btn {
+            position: absolute;
+            right: 0.9rem;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 1.25rem;
+            user-select: none;
+            transition: color 0.2s;
+        }
+
+        .login-input-wrap .toggle-pass-btn:hover {
+            color: #ffffff;
+        }
+
+        .login-alert-box {
+            padding: 0.85rem 1rem;
+            border-radius: 0.75rem;
+            font-size: 0.85rem;
+            margin-bottom: 1.25rem;
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid rgba(239, 68, 68, 0.35);
+            color: #fca5a5;
+            animation: fadeIn 0.2s ease;
+        }
+
+        .login-adv-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            cursor: pointer;
+            margin-bottom: 0.75rem;
+            user-select: none;
+            transition: color 0.2s;
+        }
+
+        .login-adv-btn:hover {
+            color: #ffffff;
+        }
+
+        .login-adv-btn .material-icons-round {
+            font-size: 1.1rem;
+            transition: transform 0.2s ease;
+        }
+
+        .login-adv-btn.open .material-icons-round {
+            transform: rotate(180deg);
+        }
+
+        .btn-page-submit {
+            width: 100%;
+            padding: 0.95rem 1.25rem;
+            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+            border: none;
+            border-radius: 0.75rem;
+            color: #ffffff;
+            font-size: 1rem;
+            font-weight: 600;
+            font-family: inherit;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            transition: all 0.25s ease;
+            box-shadow: 0 8px 24px rgba(37, 99, 235, 0.4);
+            margin-top: 1rem;
+        }
+
+        .btn-page-submit:hover {
+            background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+            transform: translateY(-1px);
+            box-shadow: 0 12px 28px rgba(37, 99, 235, 0.5);
+        }
+
+        .btn-page-submit:active {
+            transform: translateY(0);
+        }
+
+        .btn-page-submit:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .login-card-footer {
+            margin-top: 2rem;
+            text-align: center;
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            opacity: 0.85;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.4rem;
+        }
     </style>
 </head>
 <body>
 
-    <div class="sidebar">
+    <!-- ====== FULLSCREEN LOGIN PAGE FIRST ====== -->
+    <div id="loginPage" class="login-page-wrapper">
+        <div class="login-card">
+            <div class="login-brand-header">
+                <div class="login-logo-glow">
+                    <span class="material-icons-round">bolt</span>
+                </div>
+                <h2>Max IT IoT Admin</h2>
+                <p>EMS Partner Device & Data Management Portal</p>
+            </div>
+
+            <div id="loginAlert" class="login-alert-box" style="display:none;"></div>
+
+            <form id="mainLoginForm" onsubmit="handleMainLogin(event)">
+                <div class="login-field-group">
+                    <label for="mainLoginEmail">Admin Email</label>
+                    <div class="login-input-wrap">
+                        <span class="material-icons-round field-icon">email</span>
+                        <input type="email" id="mainLoginEmail" placeholder="admin@ems.com" required autocomplete="email">
+                    </div>
+                </div>
+
+                <div class="login-field-group">
+                    <label for="mainLoginPass">Password</label>
+                    <div class="login-input-wrap">
+                        <span class="material-icons-round field-icon">lock</span>
+                        <input type="password" id="mainLoginPass" placeholder="••••••••" required autocomplete="current-password">
+                        <span class="material-icons-round toggle-pass-btn" onclick="togglePasswordVisibility('mainLoginPass', this)">visibility</span>
+                    </div>
+                </div>
+
+                <div class="login-adv-btn" onclick="toggleAdvancedSettings()">
+                    <span class="material-icons-round" id="advArrow">tune</span>
+                    <span>Server / Target API URL</span>
+                </div>
+                <div id="advancedSettings" style="display: none; margin-bottom: 1rem;">
+                    <input type="text" id="mainLoginBaseUrl" placeholder="Leave empty for local (or http://localhost:3002)" style="width: 100%; padding: 0.65rem 0.85rem; font-size: 0.8rem; background: rgba(15, 23, 42, 0.8); border: 1px solid var(--border-color); border-radius: 0.5rem; color: #fff;">
+                </div>
+
+                <button type="submit" id="btnMainLoginSubmit" class="btn-page-submit">
+                    <span>Sign In to Portal</span>
+                    <span class="material-icons-round">arrow_forward</span>
+                </button>
+            </form>
+
+            <div class="login-card-footer">
+                <span class="material-icons-round" style="font-size: 1rem; color: var(--primary);">shield</span>
+                <span>Secured Admin Gateway • EMS Partner</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== DASHBOARD SIDEBAR ====== -->
+    <div class="sidebar" id="appSidebar" style="display: none;">
         <div class="brand">
             <span class="material-icons-round">bolt</span>
             Max IT IoT
@@ -553,11 +832,15 @@
         
         <div style="border-top: 1px solid var(--border-color); padding-top: 1rem; margin-top: auto;">
             <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.5rem;">API TARGET URL:</div>
-            <input type="text" id="baseUrl" value="" placeholder="Leave empty for local server" style="padding: 0.5rem; font-size: 0.75rem; margin-bottom:0;">
+            <input type="text" id="baseUrl" value="" placeholder="Leave empty for local server" style="padding: 0.5rem; font-size: 0.75rem; margin-bottom:0.65rem;">
+            <button class="btn-sm btn-outline btn-danger" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 0.4rem; padding: 0.55rem; font-size: 0.82rem;" onclick="clearToken()">
+                <span class="material-icons-round" style="font-size: 1.05rem;">logout</span> Sign Out
+            </button>
         </div>
     </div>
 
-    <div class="main-wrapper">
+    <!-- ====== MAIN DASHBOARD WRAPPER ====== -->
+    <div class="main-wrapper" id="appMain" style="display: none;">
         <div class="topbar">
             <h1 class="page-title" style="margin: 0;" id="topbarTitle">Dashboard Overview</h1>
             <div class="d-flex gap-3">
@@ -565,8 +848,9 @@
                     <span style="font-size: 0.75rem; color: var(--text-muted);">Current Authentication</span>
                     <span id="tokenDisplay" style="font-size: 0.85rem; font-family: monospace; color: var(--danger);">Not Logged In</span>
                 </div>
-                <button class="btn-sm btn-outline" id="btnLogin" onclick="openLoginModal()" style="color:var(--text-main); border-color:var(--text-muted);">Login</button>
-                <button class="btn-sm btn-outline btn-danger" style="display:none;" id="btnLogout" onclick="clearToken()">Logout</button>
+                <button class="btn-sm btn-outline btn-danger" id="btnLogout" onclick="clearToken()" style="display:none; align-items: center; gap: 0.35rem;">
+                    <span class="material-icons-round" style="font-size: 1rem;">logout</span> Logout
+                </button>
             </div>
         </div>
 
@@ -1231,27 +1515,151 @@
     let authToken = localStorage.getItem('api_token') || '';
     
     function getBaseUrl() {
-        let url = document.getElementById('baseUrl').value.trim();
+        const input = document.getElementById('baseUrl');
+        let url = input ? input.value.trim() : '';
         if (url.endsWith('/')) url = url.slice(0, -1);
         return url;
+    }
+
+    function checkAuthView() {
+        const loginPage = document.getElementById('loginPage');
+        const sidebar = document.getElementById('appSidebar');
+        const main = document.getElementById('appMain');
+        
+        if (authToken) {
+            if (loginPage) loginPage.style.display = 'none';
+            if (sidebar) sidebar.style.display = 'flex';
+            if (main) main.style.display = 'flex';
+            document.body.style.display = 'flex';
+            updateTokenDisplay();
+        } else {
+            if (loginPage) loginPage.style.display = 'flex';
+            if (sidebar) sidebar.style.display = 'none';
+            if (main) main.style.display = 'none';
+            document.body.style.display = 'block';
+            updateTokenDisplay();
+        }
     }
 
     function updateTokenDisplay() {
         const el = document.getElementById('tokenDisplay');
         const btn = document.getElementById('btnLogout');
         if(authToken) {
-            el.textContent = 'Active (...'+authToken.substring(authToken.length-6)+')';
-            el.style.color = 'var(--success)';
-            btn.style.display = 'block';
-            document.getElementById('btnLogin').style.display = 'none';
+            if (el) {
+                el.textContent = 'Active (...'+authToken.substring(authToken.length-6)+')';
+                el.style.color = 'var(--success)';
+            }
+            if (btn) btn.style.display = 'inline-flex';
         } else {
-            el.textContent = 'Not Logged In';
-            el.style.color = 'var(--danger)';
-            btn.style.display = 'none';
-            document.getElementById('btnLogin').style.display = 'block';
-            document.getElementById('statTotalDev').innerText = '-';
-            document.getElementById('statOnlineDev').innerText = '-';
-            document.getElementById('statTotalUsers').innerText = '-';
+            if (el) {
+                el.textContent = 'Not Logged In';
+                el.style.color = 'var(--danger)';
+            }
+            if (btn) btn.style.display = 'none';
+            const s1 = document.getElementById('statTotalDev');
+            const s2 = document.getElementById('statOnlineDev');
+            const s3 = document.getElementById('statTotalUsers');
+            if (s1) s1.innerText = '-';
+            if (s2) s2.innerText = '-';
+            if (s3) s3.innerText = '-';
+        }
+    }
+
+    async function handleMainLogin(e) {
+        if (e) e.preventDefault();
+        const email = document.getElementById('mainLoginEmail').value.trim();
+        const pass = document.getElementById('mainLoginPass').value;
+        const targetUrl = document.getElementById('mainLoginBaseUrl').value.trim();
+        const btn = document.getElementById('btnMainLoginSubmit');
+        const alertBox = document.getElementById('loginAlert');
+
+        if (targetUrl) {
+            const baseInput = document.getElementById('baseUrl');
+            if (baseInput) baseInput.value = targetUrl;
+        }
+
+        if (alertBox) alertBox.style.display = 'none';
+        btn.disabled = true;
+        btn.innerHTML = `<span class="material-icons-round" style="animation:spin 1s linear infinite;">sync</span> <span>Authenticating...</span>`;
+
+        try {
+            const res = await fetch(`${getBaseUrl()}/api/auth/login`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, password: pass })
+            });
+            const data = await safeFetchParse(res);
+
+            if (res.ok && data.token) {
+                authToken = data.token;
+                localStorage.setItem('api_token', authToken);
+                checkAuthView();
+                fetchMyDevices();
+                getAdminStats();
+            } else {
+                if (alertBox) {
+                    alertBox.style.display = 'flex';
+                    alertBox.style.background = 'rgba(239, 68, 68, 0.15)';
+                    alertBox.style.borderColor = 'rgba(239, 68, 68, 0.35)';
+                    alertBox.style.color = '#fca5a5';
+                    alertBox.innerHTML = `<span class="material-icons-round">error_outline</span> <span>${typeof data === 'object' ? (data.message || JSON.stringify(data)) : data}</span>`;
+                }
+            }
+        } catch (err) {
+            if (alertBox) {
+                alertBox.style.display = 'flex';
+                alertBox.style.background = 'rgba(239, 68, 68, 0.15)';
+                alertBox.style.borderColor = 'rgba(239, 68, 68, 0.35)';
+                alertBox.style.color = '#fca5a5';
+                alertBox.innerHTML = `<span class="material-icons-round">wifi_off</span> <span>Network Error: ${err.message}</span>`;
+            }
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = `<span>Sign In to Portal</span> <span class="material-icons-round">arrow_forward</span>`;
+        }
+    }
+
+    function togglePasswordVisibility(inputId, iconEl) {
+        const input = document.getElementById(inputId);
+        if (input.type === 'password') {
+            input.type = 'text';
+            iconEl.textContent = 'visibility_off';
+        } else {
+            input.type = 'password';
+            iconEl.textContent = 'visibility';
+        }
+    }
+
+    function toggleAdvancedSettings() {
+        const adv = document.getElementById('advancedSettings');
+        const btn = document.querySelector('.login-adv-btn');
+        if (!adv) return;
+        if (adv.style.display === 'none' || adv.style.display === '') {
+            adv.style.display = 'block';
+            if (btn) btn.classList.add('open');
+        } else {
+            adv.style.display = 'none';
+            if (btn) btn.classList.remove('open');
+        }
+    }
+
+    function clearToken() {
+        authToken = '';
+        localStorage.removeItem('api_token');
+        checkAuthView();
+        const passInput = document.getElementById('mainLoginPass');
+        if (passInput) passInput.value = '';
+        const alertBox = document.getElementById('loginAlert');
+        if (alertBox) {
+            alertBox.style.display = 'flex';
+            alertBox.style.background = 'rgba(59, 130, 246, 0.15)';
+            alertBox.style.borderColor = 'rgba(59, 130, 246, 0.35)';
+            alertBox.style.color = '#93c5fd';
+            alertBox.innerHTML = `<span class="material-icons-round">check_circle</span> <span>Signed out successfully.</span>`;
+        }
+        const devList = document.getElementById('deviceList');
+        if (devList) {
+            devList.innerHTML = '<div style="color: var(--text-muted); text-align: center; padding: 2rem;">Please sign in to view your devices.</div>';
         }
     }
 
@@ -1262,14 +1670,6 @@
     
     function closeLoginModal() {
         document.getElementById('loginModal').classList.remove('active');
-    }
-
-    function clearToken() {
-        authToken = '';
-        localStorage.removeItem('api_token');
-        updateTokenDisplay();
-        document.getElementById('deviceList').innerHTML = '<div style="color: var(--text-muted); text-align: center; padding: 2rem;">Please login or click refresh to load your devices.</div>';
-        alert("Logged out successfully");
     }
 
     function setResponse(id, data, isError = false) {
@@ -1439,7 +1839,7 @@
             if(res.ok && data.token) {
                 authToken = data.token;
                 localStorage.setItem('api_token', authToken);
-                updateTokenDisplay();
+                checkAuthView();
                 fetchMyDevices();
                 getAdminStats();
                 closeLoginModal(); // Close modal on success
@@ -3219,7 +3619,7 @@
     }
 
     // INITIALIZATION
-    updateTokenDisplay();
+    checkAuthView();
     if(authToken) {
         getAdminStats();
         fetchMyDevices();

@@ -1638,8 +1638,8 @@ app.use('/api/auth', authRouter);
 app.use('/api/user', userRouter);
 app.use('/api/admin', adminRouter);
 
-// রুট রুট
-app.get('/', (req, res) => {
+// রুট রুট এবং লগইন পেজ
+app.get(['/', '/login'], (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
