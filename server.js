@@ -1457,10 +1457,165 @@ adminRouter.post('/device/generate-history', async (req, res) => {
 });
 
 adminRouter.get('/users', async (req, res) => {
-    const users = await req.db.collection('users').find({}, { projection: { passwordHash: 0 } }).toArray();
-    res.send(users);
+    try {
+        const { search } = req.query;
+        let query = {};
+        if (search && typeof search === 'string' && search.trim()) {
+            const regex = { $regex: search.trim(), $options: 'i' };
+            query = {
+                $or: [
+                    { name: regex },
+                    { email: regex },
+                    { mobile: regex },
+                    { address: regex },
+                    { devices: regex }
+                ]
+            };
+        }
+        const users = await req.db.collection('users')
+            .find(query, { projection: { passwordHash: 0 } })
+            .sort({ createdAt: -1 })
+            .toArray();
+        res.send(users);
+    } catch (e) {
+        res.status(500).send({ error: e.message });
+    }
 });
 
+// Admin: Create new user
+adminRouter.post('/user', async (req, res) => {
+    try {
+        const { name, email, password, mobile, address, isAdmin, devices } = req.body;
+        if (!name || !email || !password) {
+            return res.status(400).send({ success: false, message: 'Name, email and password are required' });
+        }
+        const cleanEmail = String(email).trim().toLowerCase();
+        const usersCol = req.db.collection('users');
+        const existing = await usersCol.findOne({ email: cleanEmail });
+        if (existing) {
+            return res.status(400).send({ success: false, message: 'User with this email already exists' });
+        }
+
+        let deviceArray = [];
+        if (Array.isArray(devices)) {
+            deviceArray = devices.map(d => String(d).trim()).filter(Boolean);
+        } else if (typeof devices === 'string') {
+            deviceArray = devices.split(',').map(d => d.trim()).filter(Boolean);
+        }
+
+        const passwordHash = await bcrypt.hash(String(password), 10);
+        const newUser = {
+            name: String(name).trim(),
+            email: cleanEmail,
+            passwordHash,
+            mobile: mobile ? String(mobile).trim() : '',
+            address: address ? String(address).trim() : '',
+            isAdmin: Boolean(isAdmin),
+            devices: deviceArray,
+            createdAt: new Date(),
+            updatedAt: new Date()
+        };
+
+        const result = await usersCol.insertOne(newUser);
+        const { passwordHash: _, ...createdUser } = newUser;
+        createdUser._id = result.insertedId;
+
+        res.status(201).send({ success: true, message: 'User created successfully', user: createdUser });
+    } catch (e) {
+        res.status(500).send({ success: false, error: e.message });
+    }
+});
+
+// Admin: Update user profile details
+adminRouter.put('/user/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { name, email, mobile, address, isAdmin, devices, password } = req.body;
+        const usersCol = req.db.collection('users');
+
+        let userQuery = null;
+        if (ObjectId.isValid(id) && String(new ObjectId(id)) === id) {
+            userQuery = { _id: new ObjectId(id) };
+        } else {
+            userQuery = { email: String(id).trim().toLowerCase() };
+        }
+
+        const existingUser = await usersCol.findOne(userQuery);
+        if (!existingUser) {
+            return res.status(404).send({ success: false, message: 'User not found' });
+        }
+
+        const updateFields = { updatedAt: new Date() };
+
+        if (name !== undefined) updateFields.name = String(name).trim();
+        if (mobile !== undefined) updateFields.mobile = String(mobile).trim();
+        if (address !== undefined) updateFields.address = String(address).trim();
+        if (isAdmin !== undefined) updateFields.isAdmin = Boolean(isAdmin);
+
+        if (email !== undefined) {
+            const cleanEmail = String(email).trim().toLowerCase();
+            if (cleanEmail !== existingUser.email) {
+                const duplicate = await usersCol.findOne({ email: cleanEmail, _id: { $ne: existingUser._id } });
+                if (duplicate) {
+                    return res.status(400).send({ success: false, message: 'Email already in use by another user' });
+                }
+                updateFields.email = cleanEmail;
+            }
+        }
+
+        if (devices !== undefined) {
+            if (Array.isArray(devices)) {
+                updateFields.devices = devices.map(d => String(d).trim()).filter(Boolean);
+            } else if (typeof devices === 'string') {
+                updateFields.devices = devices.split(',').map(d => d.trim()).filter(Boolean);
+            }
+        }
+
+        if (password && typeof password === 'string' && password.trim().length > 0) {
+            updateFields.passwordHash = await bcrypt.hash(password.trim(), 10);
+        }
+
+        await usersCol.updateOne({ _id: existingUser._id }, { $set: updateFields });
+
+        const updatedDoc = await usersCol.findOne({ _id: existingUser._id }, { projection: { passwordHash: 0 } });
+        res.send({ success: true, message: 'User profile updated successfully', user: updatedDoc });
+    } catch (e) {
+        res.status(500).send({ success: false, error: e.message });
+    }
+});
+
+// Admin: Delete user
+adminRouter.delete('/user/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const usersCol = req.db.collection('users');
+
+        let userQuery = null;
+        if (ObjectId.isValid(id) && String(new ObjectId(id)) === id) {
+            userQuery = { _id: new ObjectId(id) };
+        } else {
+            userQuery = { email: String(id).trim().toLowerCase() };
+        }
+
+        const targetUser = await usersCol.findOne(userQuery);
+        if (!targetUser) {
+            return res.status(404).send({ success: false, message: 'User not found' });
+        }
+
+        // Prevent deleting super admin or oneself
+        if (process.env.ADMIN_EMAIL && targetUser.email === process.env.ADMIN_EMAIL) {
+            return res.status(403).send({ success: false, message: 'Cannot delete master system administrator' });
+        }
+        if (req.user && String(targetUser._id) === String(req.user.userId)) {
+            return res.status(400).send({ success: false, message: 'Cannot delete your own admin account while logged in' });
+        }
+
+        await usersCol.deleteOne({ _id: targetUser._id });
+        res.send({ success: true, message: `User ${targetUser.email} deleted successfully` });
+    } catch (e) {
+        res.status(500).send({ success: false, error: e.message });
+    }
+});
 
 adminRouter.post('/user/make-admin', async (req, res) => {
     await req.db.collection('users').updateOne({ email: req.body.email }, { $set: { isAdmin: true } });
@@ -1637,18 +1792,112 @@ adminRouter.get('/backup/download/:jobId', (req, res) => {
 
 adminRouter.get('/ai-chats', async (req, res) => {
     try {
-        const { uid, email, limit = 100 } = req.query;
+        const { uid, email, role, q, startDate, endDate, limit = 50, page = 1 } = req.query;
         const query = {};
-        if (uid) query.uid = String(uid);
-        if (email) query.userEmail = String(email);
-        const chats = await req.db.collection('device_chats')
-            .find(query)
-            .sort({ timestamp: -1 })
-            .limit(parseInt(limit, 10))
-            .toArray();
-        res.send({ success: true, count: chats.length, chats });
+
+        if (uid && typeof uid === 'string' && uid.trim()) {
+            query.uid = uid.trim();
+        }
+        if (email && typeof email === 'string' && email.trim()) {
+            query.userEmail = { $regex: email.trim(), $options: 'i' };
+        }
+        if (role && (role === 'user' || role === 'assistant')) {
+            query.role = role;
+        }
+        if (q && typeof q === 'string' && q.trim()) {
+            query.message = { $regex: q.trim(), $options: 'i' };
+        }
+
+        // Date range filter
+        const dateFilter = {};
+        if (startDate && typeof startDate === 'string' && startDate.trim()) {
+            const start = new Date(startDate.trim());
+            if (!isNaN(start.getTime())) {
+                dateFilter.$gte = start;
+            }
+        }
+        if (endDate && typeof endDate === 'string' && endDate.trim()) {
+            const end = new Date(endDate.trim());
+            if (!isNaN(end.getTime())) {
+                // If date string without time, include full end of day
+                if (!endDate.includes('T') && !endDate.includes(':')) {
+                    end.setHours(23, 59, 59, 999);
+                }
+                dateFilter.$lte = end;
+            }
+        }
+        if (Object.keys(dateFilter).length > 0) {
+            query.timestamp = dateFilter;
+        }
+
+        const pageSize = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 500);
+        const pageNum = Math.max(parseInt(page, 10) || 1, 1);
+        const skip = (pageNum - 1) * pageSize;
+
+        const chatsCol = req.db.collection('device_chats');
+        const [total, totalAll, uniqueUsers, uniqueDevices, chats] = await Promise.all([
+            chatsCol.countDocuments(query),
+            chatsCol.estimatedDocumentCount().catch(() => 0),
+            chatsCol.distinct('userEmail').catch(() => []),
+            chatsCol.distinct('uid').catch(() => []),
+            chatsCol.find(query)
+                .sort({ timestamp: -1 })
+                .skip(skip)
+                .limit(pageSize)
+                .toArray()
+        ]);
+
+        res.send({
+            success: true,
+            page: pageNum,
+            limit: pageSize,
+            count: chats.length,
+            total,
+            totalAll,
+            uniqueUsersCount: uniqueUsers.filter(Boolean).length,
+            uniqueDevicesCount: uniqueDevices.filter(Boolean).length,
+            uniqueUsers: uniqueUsers.filter(Boolean),
+            uniqueDevices: uniqueDevices.filter(Boolean),
+            chats
+        });
     } catch (err) {
-        res.status(500).send({ error: err.message });
+        res.status(500).send({ success: false, error: err.message });
+    }
+});
+
+// Admin: Delete a single AI chat message
+adminRouter.delete('/ai-chat/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        if (!ObjectId.isValid(id)) {
+            return res.status(400).send({ success: false, message: 'Invalid Chat ID' });
+        }
+        const result = await req.db.collection('device_chats').deleteOne({ _id: new ObjectId(id) });
+        if (result.deletedCount === 0) {
+            return res.status(404).send({ success: false, message: 'Chat entry not found' });
+        }
+        res.send({ success: true, message: 'Chat log deleted successfully' });
+    } catch (err) {
+        res.status(500).send({ success: false, error: err.message });
+    }
+});
+
+// Admin: Clear AI chats by device or user
+adminRouter.delete('/ai-chats/clear', async (req, res) => {
+    try {
+        const { uid, email } = req.body;
+        const query = {};
+        if (uid) query.uid = String(uid).trim();
+        if (email) query.userEmail = String(email).trim().toLowerCase();
+
+        if (Object.keys(query).length === 0) {
+            return res.status(400).send({ success: false, message: 'Please specify uid or email to clear chats' });
+        }
+
+        const result = await req.db.collection('device_chats').deleteMany(query);
+        res.send({ success: true, message: `Cleared ${result.deletedCount} chat entries` });
+    } catch (err) {
+        res.status(500).send({ success: false, error: err.message });
     }
 });
 
