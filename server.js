@@ -396,7 +396,7 @@ publicRouter.post('/device/data-by-range', authenticateJWT, async (req, res) => 
             if (!isNaN(numLimit) && numLimit > 0 && limit !== 'all') {
                 cursor.limit(numLimit);
             } else {
-                cursor.limit(150000); // Support up to 3+ years of 15-minute readings without truncation
+                cursor.limit(250000); // Support up to 7+ years of 15-minute readings without truncation
             }
             docs = await cursor.toArray();
         } else {
