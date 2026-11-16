@@ -335,24 +335,32 @@ publicRouter.post('/device/data-by-range', authenticateJWT, async (req, res) => 
         const query = { uid: String(uid) };
         if (start || end) {
             query.receivedAt = {};
+            const parseDateParam = (str, isEnd = false) => {
+                if (!str) return null;
+                let s = String(str).trim();
+                if (!s) return null;
+                if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+                    s = isEnd ? `${s}T23:59:59.999+06:00` : `${s}T00:00:00.000+06:00`;
+                } else if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(s)) {
+                    s = isEnd ? `${s}:59.999+06:00` : `${s}:00.000+06:00`;
+                } else if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(s)) {
+                    s = isEnd ? `${s}.999+06:00` : `${s}.000+06:00`;
+                }
+                const d = new Date(s);
+                return isNaN(d.getTime()) ? null : d;
+            };
+
             if (start) {
-                const startDate = new Date(start);
-                if (!isNaN(startDate.getTime())) {
+                const startDate = parseDateParam(start, false);
+                if (startDate) {
                     query.receivedAt.$gte = startDate;
                 } else {
                     return res.status(400).send({ success: false, message: 'Invalid start date format' });
                 }
             }
             if (end) {
-                let endDate = new Date(end);
-                if (!isNaN(endDate.getTime())) {
-                    if (typeof end === 'string') {
-                        if (end.length === 10) {
-                            endDate = new Date(endDate.getTime() + 86400000 - 1);
-                        } else if (end.length === 16) {
-                            endDate = new Date(endDate.getTime() + 60000 - 1);
-                        }
-                    }
+                const endDate = parseDateParam(end, true);
+                if (endDate) {
                     query.receivedAt.$lte = endDate;
                 } else {
                     return res.status(400).send({ success: false, message: 'Invalid end date format' });
