@@ -1,0 +1,230 @@
+================================================================================
+                    EMS PARTNER - OPEN-METEO INTEGRATION DOCUMENTATION
+================================================================================
+File: Server/ems-partner-editor/meteo.txt
+Project: EMS Partner (Environmental Monitoring System)
+Target Server: Server/ems-partner-editor/server.js
+API Endpoint: POST /api/public/device/sync-historical
+================================================================================
+
+1. INTRODUCTION & OVERVIEW
+--------------------------------------------------------------------------------
+Open-Meteo (https://open-meteo.com) is an open-source, non-commercial weather 
+API that provides accurate historical and archive meteorological data without 
+requiring API keys.
+
+In this project, Open-Meteo is integrated to solve the "missing historical data" 
+problem for IoT devices. When a new device is installed or when a device was 
+offline for a period, administrators can synchronize real historical weather 
+data based on the device's exact GPS coordinates (Latitude & Longitude).
+
+The server downloads hourly temperature, humidity, and rainfall from Open-Meteo, 
+expands it into 15-minute intervals matching standard ESP32 telemetry, calculates 
+realistic water-level fluctuations, and saves the data directly into MongoDB 
+(`espdata2` collection) while streaming live progress via Socket.io.
+
+
+2. ARCHITECTURE & WORKFLOW DIAGRAM
+--------------------------------------------------------------------------------
+   [ User / Admin UI ]
+          │  1. POST /api/public/device/sync-historical { uid, startDate, endDate }
+          ▼
+   [ Express Backend (server.js) ]
+          │  2. Validate JWT & fetch Device (Latitude, Longitude, Water Level)
+          ▼
+   [ Open-Meteo Archive API ]
+   (https://archive-api.open-meteo.com/v1/archive)
+          │  3. Returns hourly: temperature_2m, relative_humidity_2m, rain
+          ▼
+   [ Data Processing & Expansion ]
+          │  4. Delete existing duplicates in range
+          │  5. 1 Hour -> 4 Records of 15 Minutes (00, 15, 30, 45 min)
+          │  6. Simulate water level (base level + fluctuation + rain impact)
+          ▼
+   [ MongoDB (espdata2) ]  ───(Socket.io sync_progress)───▶  [ Live Progress Bar in UI ]
+          │
+          ▼
+   [ Complete: Records Available in Charts, Filtered Data Points & PDF Reports ]
+
+
+3. DETAILED STEP-BY-STEP PROCESS
+--------------------------------------------------------------------------------
+
+Step 3.1: Request Authentication & Parameter Validation
+------------------------------------------------------
+- Route: `POST /api/public/device/sync-historical`
+- Guarded by: `authenticateJWT` middleware.
+- Request Body:
+    {
+      "uid": "8C:4F:00:16:78:78",
+      "startDate": "2026-11-01",   // Optional (defaults to 7 days before endDate)
+      "endDate": "2026-11-15"      // Optional (defaults to 2 days ago)
+    }
+
+Step 3.2: Date Limits & Safety Safeguards
+-----------------------------------------
+1. Open-Meteo Archive Delay:
+   Open-Meteo's historical archive has an inherent ~2 days processing lag.
+   Therefore, the maximum allowed end date is clamped:
+     const maxAllowedDate = new Date(Date.now() - 2 * 86400000);
+   If the user requests today or yesterday, it safely caps to 2 days ago.
+
+2. Maximum Time Range:
+   To prevent server memory crashes or Open-Meteo rate limits, the maximum
+   allowed sync span is 730 days (2 years):
+     const MAX_DAYS = 730;
+
+Step 3.3: Fetching Device Geolocation
+-------------------------------------
+The server queries the `devices` collection in MongoDB:
+  const device = await req.db.collection('devices').findOne({ uid: String(uid) });
+
+Requirements:
+- `device.latitude` and `device.longitude` must be set. If either is missing,
+  the server returns:
+  HTTP 400: "Device does not have latitude/longitude set"
+- `device.water_level`: Used as the base water level (defaults to 0 if null).
+
+Step 3.4: Fetching Historical Data from Open-Meteo
+--------------------------------------------------
+The server builds the Open-Meteo Archive query URL:
+  const apiUrl = `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lon}&start_date=${startStr}&end_date=${endStr}&hourly=temperature_2m,relative_humidity_2m,rain&timezone=auto`;
+
+Requested Hourly Fields:
+  - `temperature_2m`: Air temperature at 2 meters above ground level (°C)
+  - `relative_humidity_2m`: Relative humidity at 2 meters (%)
+  - `rain`: Precipitation amount (mm)
+  - `timezone=auto`: Automatically handles timezone offset for the location
+
+Step 3.5: De-Duplication in MongoDB
+------------------------------------
+To prevent duplicate records if the same date range is synced again, the server 
+deletes any existing records for this UID within that timeframe:
+  await req.db.collection('espdata2').deleteMany({
+      uid: String(uid),
+      receivedAt: { $gte: start, $lte: new Date(end.getTime() + 86400000) }
+  });
+
+Step 3.6: Telemetry Expansion (1 Hour -> 4 x 15-Minute Records)
+--------------------------------------------------------------
+Open-Meteo provides hourly timestamps (e.g. 01:00, 02:00). However, IoT sensors 
+report every 15 minutes. To maintain uniform data intervals for charts and 
+tables, each hour is converted into 4 data points (at +0m, +15m, +30m, +45m):
+
+For each 15-minute point:
+1. Timestamp: `new Date(baseDateObj.getTime() + m * 15 * 60000)`
+2. Temperature: Hourly value from Open-Meteo (fallback 25.0 °C).
+3. Humidity: Hourly value from Open-Meteo (fallback 60.0 %).
+4. Rainfall: Hourly rainfall in mm (fallback 0.0 mm).
+5. Water Level Simulation:
+   - Base Level: `device.water_level`
+   - Natural Sensor Fluctuation: Random offset between -0.5 ft and +0.5 ft.
+   - Rain Impact: If `rain > 0`, increases water level by `rain * 0.1 ft`.
+   - Result: `calcWaterLevel = Math.max(0, Math.round((base + fluctuation + rainBonus) * 100) / 100)`
+
+Document Format Generated:
+  {
+      "uid": "8C:4F:00:16:78:78",
+      "receivedAt": ISODate("2026-11-10T00:15:00.000Z"),
+      "timestamp": "2026-11-10T00:15:00.000Z",
+      "dateTime": "2026-11-10T00:15:00.000Z",
+      "version": "1.0",
+      "environment": { "temp": 24.5, "hum": 78.0 },
+      "rain": { "mm": 0.0 },
+      "pssensor": { "depth_ft": 46.52 },
+      "temperature": 24.5,
+      "humidity": 78.0,
+      "rainfall": 0.0,
+      "water_level": 46.52
+  }
+
+Step 3.7: Batch Insertion & Real-Time Socket.io Progress
+--------------------------------------------------------
+- Batch Size: 96 records (exactly 1 day of 15-minute readings: 24 hours * 4 = 96).
+- Database Write: `insertMany(batch, { ordered: false })`
+- WebSocket Event: After every batch, the server broadcasts:
+    io.emit('sync_progress', {
+        uid: "8C:4F:00:16:78:78",
+        percent: 45,          // Progress percentage (0 - 100)
+        current: 672,         // Number of records inserted so far
+        total: 1440           // Total records to insert
+    });
+- Event Loop Yield: `await new Promise(r => setTimeout(r, 50))` gives the Node.js
+  event loop time to deliver Socket.io packets and prevent UI freezing.
+
+
+4. API SPECIFICATION
+--------------------------------------------------------------------------------
+
+Endpoint:
+  POST /api/public/device/sync-historical
+
+Headers:
+  Content-Type: application/json
+  Authorization: Bearer <JWT_TOKEN>
+
+Request Body:
+  {
+    "uid": "8C:4F:00:16:78:78",
+    "startDate": "2026-11-01",
+    "endDate": "2026-11-15"
+  }
+
+Successful Response (200 OK):
+  {
+    "success": true,
+    "message": "Successfully synchronized and generated 1440 historical records.",
+    "count": 1440
+  }
+
+Error Responses:
+  - 400 Bad Request:
+    { "success": false, "message": "uid is required" }
+    or
+    { "success": false, "message": "Device does not have latitude/longitude set" }
+    or
+    { "success": false, "message": "Invalid start or end date" }
+
+  - 404 Not Found:
+    { "success": false, "message": "Device not found" }
+
+  - 500 Internal Server Error:
+    { "success": false, "message": "Failed to fetch historical weather data" }
+
+
+5. EXAMPLE CURL COMMAND
+--------------------------------------------------------------------------------
+curl -X POST http://localhost:3002/api/public/device/sync-historical \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_AUTH_TOKEN_HERE" \
+  -d '{
+    "uid": "8C:4F:00:16:78:78",
+    "startDate": "2026-11-01",
+    "endDate": "2026-11-10"
+  }'
+
+
+6. UI INTEGRATION IN ADMIN PANEL
+--------------------------------------------------------------------------------
+Location: `Server/ems-partner-editor/public/index.html` (lines 4210 - 4248)
+
+In the Admin Panel:
+1. Each device in the device list includes a "Sync Historical" / "Sync Weather" button.
+2. Clicking it opens a date picker modal (`syncDateModal`).
+3. When submitted, `syncOverlay` appears displaying live progress (`syncProgressFill`
+   and `syncProgressText`).
+4. Socket.io client listens to `sync_progress` event and smoothly increments the 
+   progress bar from 0% to 100%.
+5. On completion, an alert notifies the user, and the device data table refreshes.
+
+
+7. SUMMARY OF KEY BENEFITS
+--------------------------------------------------------------------------------
+1. No Missing Gaps: Fills historical telemetry gaps when devices were offline.
+2. High Fidelity: Real historical temperatures and rain from global meteorological 
+   models (ERA5 / ERA5-Land).
+3. IoT Compatibility: 1-hour external data is expanded to 15-minute telemetry intervals, 
+   preserving database consistency for charts, CSV, and PDF exports.
+4. Non-Blocking: Socket.io real-time streaming provides immediate feedback for long syncs.
+5. Zero Cost: Open-Meteo requires no paid API keys.
+================================================================================
